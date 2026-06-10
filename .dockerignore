@@ -1,0 +1,15 @@
+# 编译产物（保留 alchemist-Assistant，Docker 需要拷贝）
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
