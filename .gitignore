@@ -1,5 +1,22 @@
+# Build artifacts
+/final-agent
+/alchemist-assistant
+/bin/
+/dist/
+*.test
+*.out
+/.gocache/
+
+# IDE
+/.idea/
+/.vscode/
+
+# OS
 .DS_Store
-.DS_Store
-final/final-agent
-.DS_Store
-final/final-agent
+
+# Logs
+*.log
+
+# Local env overrides
+.env
+.env.local

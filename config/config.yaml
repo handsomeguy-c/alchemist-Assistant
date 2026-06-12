@@ -1,12 +1,12 @@
 # 对话模型配置
 llm:
-  api-url: https://ark.cn-beijing.volces.com/api/v3/chat/completions
-  api-key: "ark-08c63f0b-3410-4f8b-9dd5-0114895fdf5f-7069c"
+  api_url: https://ark.cn-beijing.volces.com/api/v3/chat/completions
+  api_key: "你的apikey"
   model: deepseek-v4-flash-260425
   temperature: 0.7
 embedding:
-  api-url: https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal
-  api-key: "ark-08c63f0b-3410-4f8b-9dd5-0114895fdf5f-7069c"
+  api_url: https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal
+  api_key: "你的apikey"
   model: doubao-embedding-vision-250615
 
 # 向量数据库配置
@@ -43,6 +43,18 @@ rag:
   enable_hybrid_search: true
   rag_milvus_dim: 2048
 
+  # Query Rewrite：history-aware + multi-query
+  # 多轮指代消除 + 单查询召回扩展，对短/口语化 query 收益最大
+  rewrite:
+    enabled: true
+    num_queries: 3        # 含原查询在内的目标改写条数
+
+  # Rerank：LLM listwise 精排
+  # 召回阶段会自动扩大到 4*top_k，rerank 后再截回 top_k
+  rerank:
+    enabled: true
+    preview_len: 200      # 给 reranker 看的每条候选最大字符数
+
 memory:
   short_term_max_turns: 5
   long_term_top_k: 3
@@ -65,7 +77,7 @@ server:
 
 search:
   api_key: "填入自己的api"               # 请填入你的 Tavily API Key（可选）
-  api_url: "https://tavily.com"
+  api_url: "https://api.tavily.com/search"
 
 # ===== 知识图谱（Neo4j，可选，不可用时跳过图检索）=====
 neo4j:

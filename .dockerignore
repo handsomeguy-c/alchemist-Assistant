@@ -1,4 +1,4 @@
-# 编译产物（保留 alchemist-Assistant，Docker 需要拷贝）
+# 编译产物（保留 alchemist-assistant，Docker 需要拷贝）
 *.exe
 
 # IDE

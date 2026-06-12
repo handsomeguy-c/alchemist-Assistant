@@ -363,7 +363,7 @@ go mod tidy
 docker compose up -d
 
 # 3. 启动应用
-go run .
+go run ./cmd/server
 
 # 4. 访问 http://localhost:8090
 ```
@@ -372,7 +372,7 @@ go run .
 
 ```bash
 # 编译 + 启动全部服务
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o alchemist-Assistant .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o alchemist-assistant ./cmd/server
 docker compose up -d --build
 ```
 
@@ -395,17 +395,12 @@ docker compose up -d --build
 │   ├── config.go
 │   └── config.yaml
 ├── internal/
-│   ├── agent/                智能体核心与调度（ReAct + Harness + 路由）
-│   ├── graph/                知识图谱（Neo4j 实体关系抽取 + 图检索）
-│   ├── handler/              HTTP API 路由处理
-│   ├── infra/                基础设施连接（Milvus / PG / ES / Kafka）
-│   ├── llm/                  LLM/Embedding 客户端（真实 API + Mock 降级）
-│   ├── memory/               三层记忆系统（短期 / 长期 / 用户偏好 + 图增强）
-│   ├── rag/                  RAG 引擎（三路混合检索 + RRF 融合）
-│   ├── sandbox/              沙箱执行（Docker / Local / Mock + 安全校验）
-│   └── tools/                工具定义与调用（time/weather/search/exec_command）
+│   ├── application/          应用编排层（chat agent / ReAct / Harness / 路由）
+│   ├── domain/               领域能力（RAG / promptctx / memory / sandbox / tool）
+│   ├── infrastructure/       基础设施实现（LLM / persistence / platform / tool）
+│   └── interfaces/           HTTP API 路由处理
 ├── frontend/                 单文件前端 HTML
-├── main.go                   入口
+├── cmd/server/main.go        入口
 ├── docker-compose.yml        基础设施编排
 ├── Dockerfile                应用容器镜像
 └── go.mod
@@ -416,6 +411,3 @@ docker compose up -d --build
 ## 致谢
 
 本项目受多模态智能体、RAG、知识图谱、记忆增强等前沿研究启发，欢迎交流与合作。
-
-## Project Status
-Initial personal learning version.

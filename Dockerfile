@@ -3,11 +3,11 @@
 #
 # 编译命令（按本机 CPU 架构选 GOARCH，Apple Silicon=arm64，Intel=amd64）：
 #   ARCH=$(uname -m); case "$ARCH" in arm64|aarch64) GA=arm64 ;; x86_64) GA=amd64 ;; esac
-#   CGO_ENABLED=0 GOOS=linux GOARCH=$GA go build -ldflags="-s -w" -o alchemist-Assistant .
+#   CGO_ENABLED=0 GOOS=linux GOARCH=$GA go build -ldflags="-s -w" -o alchemist-assistant ./cmd/server
 #
 # 也可显式指定：
-#   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o alchemist-Assistant .   # M 系列 Mac
-#   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o alchemist-Assistant .   # Intel/AMD64
+#   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o alchemist-assistant ./cmd/server   # M 系列 Mac
+#   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o alchemist-assistant ./cmd/server   # Intel/AMD64
 
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/alpine:3.19
 
@@ -17,9 +17,9 @@ RUN apk add --no-cache ca-certificates tzdata curl \
 
 WORKDIR /app
 
-COPY alchemist-Assistant .
+COPY alchemist-assistant .
 COPY frontend/ ./frontend/
 
 EXPOSE 8090
 
-ENTRYPOINT ["/app/alchemist-Assistant"]
+ENTRYPOINT ["/app/alchemist-assistant"]

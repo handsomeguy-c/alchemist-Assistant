@@ -1,8 +1,8 @@
 services:
   # ===== AI Agent 应用 =====
-  alchemist-Assistant:
+  alchemist-assistant:
     build: .
-    container_name: alchemist-Assistant
+    container_name: alchemist-assistant
     ports:
       - "8090:8090"
     environment:
