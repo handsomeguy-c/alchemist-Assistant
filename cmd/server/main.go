@@ -97,7 +97,7 @@ func main() {
 func printBanner(cfg *config.APIConfig, status map[string]string) {
 	addr := ":" + cfg.ServerPort
 	fmt.Println("========================================")
-	fmt.Println("alchemist-Assistant炼丹师助手启动成功")
+	fmt.Println("alchemist-Assistant · alchemist-Assistant炼丹师助手启动成功")
 	fmt.Println("========================================")
 
 	fmt.Printf("[INFO] Service       http://localhost%s\n", addr)

@@ -1,8 +1,8 @@
 # 对话模型配置
 llm:
-  api_url: https://ark.cn-beijing.volces.com/api/v3/chat/completions
+  api_url: https://api.deepseek.com/chat/completions
   api_key: "你的apikey"
-  model: deepseek-v4-flash-260425
+  model: deepseek-v4-pro
   temperature: 0.7
 embedding:
   api_url: https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal
@@ -115,3 +115,9 @@ security:
     - "node"
     - "go"
     - "java"
+
+# ===== 图运行时（ReAct 并行调度 + 竞速）=====
+graph_runtime:
+  max_parallel: 2            # 最大并行执行节点数
+  race_timeout_ms: 30000     # 竞速组内节点超时
+  enable_racing: true        # 是否启用竞速机制（First-success-wins）

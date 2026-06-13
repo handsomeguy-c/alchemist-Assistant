@@ -395,7 +395,7 @@ docker compose up -d --build
 │   ├── config.go
 │   └── config.yaml
 ├── internal/
-│   ├── application/          应用编排层（chat agent / ReAct / Harness / 路由）
+│   ├── application/          应用编排层（chat agent / ReAct / graph runtime）
 │   ├── domain/               领域能力（RAG / promptctx / memory / sandbox / tool）
 │   ├── infrastructure/       基础设施实现（LLM / persistence / platform / tool）
 │   └── interfaces/           HTTP API 路由处理
