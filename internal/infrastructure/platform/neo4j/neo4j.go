@@ -67,6 +67,26 @@ func (c *Client) Session() driver.SessionWithContext {
 	})
 }
 
+// ReadSession returns a read-routed session for KG queries.
+func (c *Client) ReadSession() driver.SessionWithContext {
+	return c.driver.NewSession(context.Background(), driver.SessionConfig{AccessMode: driver.AccessModeRead})
+}
+
+// KGV2SchemaQueries is kept separate so schema changes are reviewable and testable.
+func KGV2SchemaQueries() []string {
+	return []string{
+		`CREATE CONSTRAINT kg_entity_id IF NOT EXISTS FOR (e:KGEntity) REQUIRE e.id IS UNIQUE`,
+		`CREATE CONSTRAINT kg_mention_id IF NOT EXISTS FOR (m:KGEntityMention) REQUIRE m.id IS UNIQUE`,
+		`CREATE CONSTRAINT kg_chunk_id IF NOT EXISTS FOR (c:KGChunk) REQUIRE c.id IS UNIQUE`,
+		`CREATE CONSTRAINT kg_chunk_pg_id IF NOT EXISTS FOR (c:KGChunk) REQUIRE c.pg_id IS UNIQUE`,
+		`CREATE INDEX kg_entity_normalized_name IF NOT EXISTS FOR (e:KGEntity) ON (e.normalized_name)`,
+		`CREATE INDEX kg_entity_type IF NOT EXISTS FOR (e:KGEntity) ON (e.type)`,
+		`CREATE INDEX kg_chunk_doc_hash IF NOT EXISTS FOR (c:KGChunk) ON (c.doc_hash)`,
+		`CREATE INDEX kg_mention_doc_hash IF NOT EXISTS FOR (m:KGEntityMention) ON (m.doc_hash)`,
+		`CREATE INDEX kg_mention_pg_id IF NOT EXISTS FOR (m:KGEntityMention) ON (m.pg_id)`,
+	}
+}
+
 // EnsureConstraints 确保 Neo4j 中存在唯一约束/索引（幂等）
 func (c *Client) EnsureConstraints() {
 	if !c.available {
@@ -81,6 +101,7 @@ func (c *Client) EnsureConstraints() {
 		`CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)`,
 		`CREATE INDEX memory_node_id IF NOT EXISTS FOR (m:Memory) ON (m.mem_id)`,
 	}
+	queries = append(queries, KGV2SchemaQueries()...)
 	for _, q := range queries {
 		if _, err := sess.Run(ctx, q, nil); err != nil {
 			// 约束已存在或版本不支持时忽略

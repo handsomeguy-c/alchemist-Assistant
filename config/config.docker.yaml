@@ -77,6 +77,26 @@ neo4j:
   max_hops: 2
   weight: 0.3
   enabled: true
+  entity_seed_top_k: 5
+  entity_vector_top_k: 10
+  entity_vector_min_score: 0.65
+  entity_vector_metric: "COSINE"
+  graph_max_hops: 2
+  graph_hop_decay: 0.7
+  graph_evidence_top_k: 20
+  relation_type_weights:
+    CAUSES: 1.0
+    DEPENDS_ON: 1.0
+    USES: 1.0
+    REPLACES: 1.0
+    PRODUCES: 0.95
+    PART_OF: 0.95
+    IS_A: 0.95
+    WORKS_FOR: 0.9
+    LOCATED_IN: 0.9
+    DESCRIBES: 0.8
+    MENTIONS: 0.7
+    RELATES_TO: 0.7
 
 # ===== 沙箱执行 =====
 # 容器内没装 docker CLI，沙箱 backend 改为 mock 避免启动期 probe 失败拖慢。

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -75,13 +76,26 @@ type KafkaConfig struct {
 
 // Neo4jConfig 知识图谱后端
 type Neo4jConfig struct {
-	Neo4jURI      string
-	Neo4jUser     string
-	Neo4jPassword string
-	KGMaxHops     int     // 图遍历最大跳数
-	KGWeight      float64 // 图检索在 RRF 中的权重
-	KGEnabled     bool    // 是否启用知识图谱
+	Neo4jURI               string
+	Neo4jUser              string
+	Neo4jPassword          string
+	KGMaxHops              int     // 图遍历最大跳数
+	KGWeight               float64 // 图检索在 RRF 中的权重
+	KGEnabled              bool    // 是否启用知识图谱
+	KGEntitySeedTopK       int
+	KGEntityVectorTopK     int
+	KGEntityVectorMinScore float64
+	KGEntityVectorMetric   string
+	KGGraphMaxHops         int
+	KGGraphHopDecay        float64
+	KGGraphEvidenceTopK    int
+	KGRelationTypeWeights  map[string]float64
 }
+
+const (
+	RelationWeightMentions = "MENTIONS"
+	RelationWeightCauses   = "CAUSES"
+)
 
 // StorageConfig 聚合所有外部存储/连接配置
 type StorageConfig struct {
@@ -259,12 +273,20 @@ type yamlFile struct {
 		APIURL string `yaml:"api_url"`
 	} `yaml:"search"`
 	Neo4j struct {
-		URI      string  `yaml:"uri"`
-		User     string  `yaml:"user"`
-		Password string  `yaml:"password"`
-		MaxHops  int     `yaml:"max_hops"`
-		Weight   float64 `yaml:"weight"`
-		Enabled  bool    `yaml:"enabled"`
+		URI                  string             `yaml:"uri"`
+		User                 string             `yaml:"user"`
+		Password             string             `yaml:"password"`
+		MaxHops              int                `yaml:"max_hops"`
+		Weight               float64            `yaml:"weight"`
+		Enabled              bool               `yaml:"enabled"`
+		EntitySeedTopK       int                `yaml:"entity_seed_top_k"`
+		EntityVectorTopK     int                `yaml:"entity_vector_top_k"`
+		EntityVectorMinScore float64            `yaml:"entity_vector_min_score"`
+		EntityVectorMetric   string             `yaml:"entity_vector_metric"`
+		GraphMaxHops         int                `yaml:"graph_max_hops"`
+		GraphHopDecay        float64            `yaml:"graph_hop_decay"`
+		GraphEvidenceTopK    int                `yaml:"graph_evidence_top_k"`
+		RelationTypeWeights  map[string]float64 `yaml:"relation_type_weights"`
 	} `yaml:"neo4j"`
 	Sandbox struct {
 		Enabled         bool   `yaml:"enabled"`
@@ -343,12 +365,20 @@ func DefaultConfig() *APIConfig {
 				KafkaTopic:   y.Kafka.Topic,
 			},
 			Neo4jConfig: Neo4jConfig{
-				Neo4jURI:      y.Neo4j.URI,
-				Neo4jUser:     y.Neo4j.User,
-				Neo4jPassword: y.Neo4j.Password,
-				KGMaxHops:     y.Neo4j.MaxHops,
-				KGWeight:      y.Neo4j.Weight,
-				KGEnabled:     y.Neo4j.Enabled,
+				Neo4jURI:               y.Neo4j.URI,
+				Neo4jUser:              y.Neo4j.User,
+				Neo4jPassword:          y.Neo4j.Password,
+				KGMaxHops:              y.Neo4j.MaxHops,
+				KGWeight:               y.Neo4j.Weight,
+				KGEnabled:              y.Neo4j.Enabled,
+				KGEntitySeedTopK:       y.Neo4j.EntitySeedTopK,
+				KGEntityVectorTopK:     y.Neo4j.EntityVectorTopK,
+				KGEntityVectorMinScore: y.Neo4j.EntityVectorMinScore,
+				KGEntityVectorMetric:   y.Neo4j.EntityVectorMetric,
+				KGGraphMaxHops:         y.Neo4j.GraphMaxHops,
+				KGGraphHopDecay:        y.Neo4j.GraphHopDecay,
+				KGGraphEvidenceTopK:    y.Neo4j.GraphEvidenceTopK,
+				KGRelationTypeWeights:  y.Neo4j.RelationTypeWeights,
 			},
 		},
 		RAGConfig: RAGConfig{
@@ -459,6 +489,42 @@ func applyDefaults(c *APIConfig) {
 	}
 	if c.KGWeight <= 0 {
 		c.KGWeight = 0.3
+	}
+	if c.KGEntitySeedTopK <= 0 {
+		c.KGEntitySeedTopK = 5
+	}
+	if c.KGEntityVectorTopK <= 0 {
+		c.KGEntityVectorTopK = 10
+	}
+	if c.KGEntityVectorMinScore <= 0 {
+		c.KGEntityVectorMinScore = 0.65
+	}
+	c.KGEntityVectorMetric = strings.ToUpper(strings.TrimSpace(c.KGEntityVectorMetric))
+	if c.KGEntityVectorMetric != "COSINE" && c.KGEntityVectorMetric != "IP" && c.KGEntityVectorMetric != "L2" {
+		c.KGEntityVectorMetric = "COSINE"
+	}
+	if c.KGGraphMaxHops <= 0 {
+		c.KGGraphMaxHops = c.KGMaxHops
+	}
+	if c.KGGraphMaxHops <= 0 {
+		c.KGGraphMaxHops = 2
+	}
+	if c.KGGraphMaxHops > 2 {
+		c.KGGraphMaxHops = 2
+	}
+	if c.KGGraphHopDecay <= 0 || c.KGGraphHopDecay > 1 {
+		c.KGGraphHopDecay = 0.7
+	}
+	if c.KGGraphEvidenceTopK <= 0 {
+		c.KGGraphEvidenceTopK = 20
+	}
+	if len(c.KGRelationTypeWeights) == 0 {
+		c.KGRelationTypeWeights = map[string]float64{
+			"CAUSES": 1, "DEPENDS_ON": 1, "USES": 1, "REPLACES": 1,
+			"PRODUCES": .95, "PART_OF": .95, "IS_A": .95,
+			"WORKS_FOR": .9, "LOCATED_IN": .9, "DESCRIBES": .8,
+			"MENTIONS": .7, "RELATES_TO": .7,
+		}
 	}
 
 	// 沙箱默认值

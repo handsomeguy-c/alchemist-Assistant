@@ -64,8 +64,10 @@ type Repo interface {
 	// 启动初始化（创建 collection / index）
 	Init(dim int)
 	// 后端可用性
+	PGAvailable() bool
 	MilvusAvailable() bool
 	ESAvailable() bool
+	MilvusClient() milvusClient.Client
 }
 
 // Store 是默认实现，组合三个底层 client
@@ -83,8 +85,12 @@ func NewStore(pg *sql.DB, milvus milvusClient.Client, esClient *es.Client) *Stor
 // MilvusAvailable 报告 Milvus 是否可用
 func (s *Store) MilvusAvailable() bool { return s.milvus != nil }
 
+func (s *Store) MilvusClient() milvusClient.Client { return s.milvus }
+
 // ESAvailable 报告 ES 是否可用
 func (s *Store) ESAvailable() bool { return s.es != nil }
+
+func (s *Store) PGAvailable() bool { return s.pg != nil }
 
 // ─────────────────────────────── PG ────────────────────────────────────────
 

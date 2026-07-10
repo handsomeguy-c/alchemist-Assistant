@@ -26,10 +26,15 @@ import (
 type HybridStore struct {
 	cfg      *config.APIConfig
 	chunks   ragchunk.Repo
-	kg       *knowledge.KGStore // 知识图谱，nil 时降级跳过
+	kg       kgRetriever // 知识图谱，nil 时降级跳过
 	embedFn  func(text string) ([]float64, error)
 	reranker Reranker // nil 时跳过精排
 	mode     string   // "hybrid" | "semantic" | "keyword" | "unavailable"
+}
+
+type kgRetriever interface {
+	Available() bool
+	Search(string, int) []knowledge.GraphSearchResult
 }
 
 // NewHybridStore 创建混合检索存储，根据基础设施可用性自动选择模式
@@ -38,6 +43,9 @@ func NewHybridStore(cfg *config.APIConfig, chunks ragchunk.Repo) *HybridStore {
 		cfg:    cfg,
 		chunks: chunks,
 		mode:   "unavailable",
+	}
+	if !chunks.PGAvailable() {
+		return hs
 	}
 	milvusOK := chunks.MilvusAvailable()
 	esOK := chunks.ESAvailable()
@@ -279,220 +287,111 @@ func (hs *HybridStore) finalize(query string, results []HybridResult, topK int) 
 
 // searchOne 执行一次完整的三路 RRF 召回（不做 rerank）
 func (hs *HybridStore) searchOne(query string, topK int, _ bool) []HybridResult {
-	switch hs.mode {
-	case "hybrid":
-		return hs.searchHybrid(query, topK)
-	case "semantic":
-		return hs.searchSemantic(query, topK)
-	case "keyword":
-		return hs.searchKeyword(query, topK)
-	default:
-		log.Printf("⚠️  检索基础设施不可用（Milvus 和 ES 均未连接）")
+	if topK <= 0 || !hs.chunks.PGAvailable() {
 		return nil
 	}
-}
-
-// ─────────────────────── Hybrid: RRF 融合 ──────────────────────────────
-
-// searchHybrid: Milvus 语义 + ES BM25 + 知识图谱，使用 Reciprocal Rank Fusion 三路融合
-func (hs *HybridStore) searchHybrid(query string, topK int) []HybridResult {
-	// 查询向量化
-	queryEmb, err := hs.embedFn(query)
-	if err != nil {
-		log.Printf("⚠️  查询向量化失败，降级到关键词检索: %v", err)
-		return hs.searchKeyword(query, topK)
-	}
-	queryEmb32 := make([]float32, len(queryEmb))
-	for i, v := range queryEmb {
-		queryEmb32[i] = float32(v)
-	}
-
-	// 从两路各取 2*topK 保证融合后有足够候选
 	fetchK := topK * 2
 	if fetchK < 10 {
 		fetchK = 10
 	}
+	type rankedSource struct {
+		ids    []int64
+		weight float64
+	}
+	sources := make([]rankedSource, 0, 3)
 
-	milvusHits, milvusErr := hs.chunks.SearchMilvus(queryEmb32, fetchK)
-	esHits, esErr := hs.chunks.SearchES(query, fetchK)
-
-	if milvusErr != nil && esErr != nil {
-		log.Printf("⚠️  Milvus 和 ES 均检索失败: %v / %v", milvusErr, esErr)
+	if hs.chunks.MilvusAvailable() && hs.embedFn != nil {
+		if embedding, err := hs.embedFn(query); err == nil && len(embedding) > 0 {
+			vector := make([]float32, len(embedding))
+			for i, value := range embedding {
+				vector[i] = float32(value)
+			}
+			if hits, err := hs.chunks.SearchMilvus(vector, fetchK); err == nil {
+				ids := make([]int64, 0, len(hits))
+				for _, hit := range hits {
+					ids = append(ids, hit.ID)
+				}
+				sources = append(sources, rankedSource{ids: ids, weight: 1})
+			} else {
+				log.Printf("⚠️  Milvus 检索失败，继续使用其他 Retriever: %v", err)
+			}
+		} else if err != nil {
+			log.Printf("⚠️  查询向量化失败，跳过 Milvus/Entity Vector: %v", err)
+		}
+	}
+	if hs.chunks.ESAvailable() {
+		if hits, err := hs.chunks.SearchES(query, fetchK); err == nil {
+			ids := make([]int64, 0, len(hits))
+			for _, hit := range hits {
+				ids = append(ids, hit.PGID)
+			}
+			sources = append(sources, rankedSource{ids: ids, weight: 1})
+		} else {
+			log.Printf("⚠️  ES 检索失败，继续使用其他 Retriever: %v", err)
+		}
+	}
+	if hs.kg != nil && hs.kg.Available() {
+		hits := hs.kg.Search(query, fetchK)
+		ids := make([]int64, 0, len(hits))
+		for _, hit := range hits {
+			if hit.PGID > 0 {
+				ids = append(ids, hit.PGID)
+			}
+		}
+		weight := hs.cfg.KGWeight
+		if weight <= 0 {
+			weight = 1
+		}
+		sources = append(sources, rankedSource{ids: ids, weight: weight})
+	}
+	if len(sources) == 0 {
 		return nil
 	}
-	if milvusErr != nil {
-		log.Printf("⚠️  Milvus 检索失败，使用关键词检索: %v", milvusErr)
-		return hs.searchKeyword(query, topK)
-	}
-	if esErr != nil {
-		log.Printf("⚠️  ES 检索失败，使用语义检索: %v", esErr)
-		return hs.searchSemantic(query, topK)
-	}
 
-	// Reciprocal Rank Fusion: score(d) = Σ w_i / (k + rank_i(d))
-	//
-	// 三路使用统一的 rank-based 评分（避免不同检索源的原始分数尺度不一致），
-	// 通过权重控制各路占比：语义/关键词默认 1.0，KG 用 cfg.KGWeight。
 	k := hs.cfg.RRFConstantK
 	if k <= 0 {
 		k = 60
 	}
-
-	rrfScores := make(map[int64]float64)
-	for rank, hit := range milvusHits {
-		rrfScores[hit.ID] += 1.0 / float64(k+rank+1)
-	}
-	for rank, hit := range esHits {
-		rrfScores[hit.PGID] += 1.0 / float64(k+rank+1)
-	}
-
-	// 知识图谱第三路：KG 节点上已持久化 pg_id（见 graph/kgstore.go upsertEntity），
-	// 直接用 hit.PGID 累加到 rrfScores 即可与 Milvus / ES 路径正确合并。
-	if hs.kg != nil && hs.kg.Available() {
-		kgWeight := hs.cfg.KGWeight
-		if kgWeight <= 0 {
-			kgWeight = 1.0
-		}
-		kgHits := hs.kg.Search(query, fetchK)
-		for rank, hit := range kgHits {
-			if hit.PGID == 0 { // 老节点（升级前数据）没有 pg_id，跳过避免污染
-				continue
-			}
-			rrfScores[hit.PGID] += kgWeight / float64(k+rank+1)
+	scores := make(map[int64]float64)
+	for _, source := range sources {
+		for rank, id := range source.ids {
+			scores[id] += source.weight / float64(k+rank+1)
 		}
 	}
-
-	// 按 RRF 分数排序
 	type idScore struct {
 		id    int64
 		score float64
 	}
-	var sorted []idScore
-	for id, score := range rrfScores {
-		sorted = append(sorted, idScore{id, score})
+	ranked := make([]idScore, 0, len(scores))
+	for id, score := range scores {
+		ranked = append(ranked, idScore{id: id, score: score})
 	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].score > sorted[j].score
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].score == ranked[j].score {
+			return ranked[i].id < ranked[j].id
+		}
+		return ranked[i].score > ranked[j].score
 	})
-	if topK < len(sorted) {
-		sorted = sorted[:topK]
+	if len(ranked) > topK {
+		ranked = ranked[:topK]
 	}
-
-	// 从 PG 批量取回 chunk 内容
-	var ids []int64
-	for _, s := range sorted {
-		ids = append(ids, s.id)
+	ids := make([]int64, 0, len(ranked))
+	for _, item := range ranked {
+		ids = append(ids, item.id)
 	}
 	rows, err := hs.chunks.LoadByIDs(ids)
 	if err != nil {
 		log.Printf("⚠️  从 PG 加载 RAG chunk 失败: %v", err)
 		return nil
 	}
-
-	type rowInfo struct {
-		content string
-		parent  string
+	rowMap := make(map[int64]ragchunk.Row, len(rows))
+	for _, row := range rows {
+		rowMap[row.ID] = row
 	}
-	rowMap := make(map[int64]rowInfo, len(rows))
-	for _, r := range rows {
-		rowMap[r.ID] = rowInfo{content: r.Content, parent: r.ParentContent}
-	}
-
-	var results []HybridResult
-	for _, s := range sorted {
-		if ri, ok := rowMap[s.id]; ok {
-			results = append(results, HybridResult{
-				Chunk:  Chunk{Content: ri.content},
-				Score:  s.score,
-				Source: "hybrid",
-				Parent: ri.parent,
-			})
-		}
-	}
-	return results
-}
-
-// ─────────────────────── Semantic: Milvus ──────────────────────────────
-
-// searchSemantic: 仅 Milvus 语义向量检索
-func (hs *HybridStore) searchSemantic(query string, topK int) []HybridResult {
-	queryEmb, err := hs.embedFn(query)
-	if err != nil {
-		log.Printf("⚠️  查询向量化失败: %v", err)
-		return nil
-	}
-	queryEmb32 := make([]float32, len(queryEmb))
-	for i, v := range queryEmb {
-		queryEmb32[i] = float32(v)
-	}
-
-	hits, err := hs.chunks.SearchMilvus(queryEmb32, topK)
-	if err != nil {
-		log.Printf("⚠️  Milvus 检索失败: %v", err)
-		return nil
-	}
-
-	var ids []int64
-	for _, h := range hits {
-		ids = append(ids, h.ID)
-	}
-	rows, _ := hs.chunks.LoadByIDs(ids)
-	type rowInfo struct {
-		content string
-		parent  string
-	}
-	rowMap := make(map[int64]rowInfo, len(rows))
-	for _, r := range rows {
-		rowMap[r.ID] = rowInfo{content: r.Content, parent: r.ParentContent}
-	}
-
-	var results []HybridResult
-	for _, h := range hits {
-		if ri, ok := rowMap[h.ID]; ok {
-			results = append(results, HybridResult{
-				Chunk:  Chunk{Content: ri.content},
-				Score:  float64(h.Distance),
-				Source: "semantic",
-				Parent: ri.parent,
-			})
-		}
-	}
-	return results
-}
-
-// ─────────────────────── Keyword: ES BM25 ──────────────────────────────
-
-// searchKeyword: 仅 Elasticsearch BM25 关键词检索
-func (hs *HybridStore) searchKeyword(query string, topK int) []HybridResult {
-	hits, err := hs.chunks.SearchES(query, topK)
-	if err != nil {
-		log.Printf("⚠️  ES 检索失败: %v", err)
-		return nil
-	}
-
-	var ids []int64
-	for _, h := range hits {
-		ids = append(ids, h.PGID)
-	}
-	rows, _ := hs.chunks.LoadByIDs(ids)
-	type rowInfo struct {
-		content string
-		parent  string
-	}
-	rowMap := make(map[int64]rowInfo, len(rows))
-	for _, r := range rows {
-		rowMap[r.ID] = rowInfo{content: r.Content, parent: r.ParentContent}
-	}
-
-	var results []HybridResult
-	for _, h := range hits {
-		if ri, ok := rowMap[h.PGID]; ok {
-			results = append(results, HybridResult{
-				Chunk:  Chunk{Content: ri.content},
-				Score:  h.Score,
-				Source: "keyword",
-				Parent: ri.parent,
-			})
+	results := make([]HybridResult, 0, len(ranked))
+	for _, item := range ranked {
+		if row, ok := rowMap[item.id]; ok {
+			results = append(results, HybridResult{Chunk: Chunk{Content: row.Content}, Score: item.score, Source: "hybrid", Parent: row.ParentContent})
 		}
 	}
 	return results

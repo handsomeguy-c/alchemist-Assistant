@@ -7,6 +7,7 @@ alchemist-Assistant炼丹师助手 是一个面向个人与企业的多模态智
 
 - **多阶段智能体核心**：支持纯对话、RAG 检索、单工具调用、多工具编排（ReAct）等多种智能体模式，自动路由。
 - **RAG 检索增强生成**：融合 Milvus 语义向量、Elasticsearch 关键词、Neo4j 知识图谱，三路 RRF 融合排序，自动降级，支持文档分块与异步实体关系抽取。
+- **KG V2 可追溯证据**：Canonical Entity、EntityMention、KGChunk 与独立关系证据确保图结果稳定回溯 PostgreSQL `pg_id`；详见 [`docs/kg-v2-mvp.md`](docs/kg-v2-mvp.md)。
 - **三层记忆系统**：短期记忆（滑动窗口）、长期记忆（Embedding/TF）、用户偏好（LLM+规则），支持去重、合并、衰减、过期淘汰。
 - **图增强记忆**：长期记忆叠加 Neo4j 图层，支持 FOLLOWS、SIMILAR_TO、CAUSES、BELONGS_TO 等关系，提升历史联想与推理能力。
 - **工具链与可恢复执行**：内置时间、天气、搜索、RAG 检索、命令执行等工具，支持 ReAct 规划-执行-生成流程，任务快照与重试机制保障稳定性。

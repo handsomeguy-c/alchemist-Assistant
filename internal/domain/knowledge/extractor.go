@@ -6,106 +6,125 @@ import (
 	"strings"
 )
 
-// Extractor 通过注入的 LLM 回调从文本中抽取实体和关系
 type Extractor struct {
-	llmFn func(systemPrompt, userMsg string) string
+	llmFn      func(systemPrompt, userMsg string) string
+	normalizer EntityNormalizer
 }
 
-// NewExtractor 创建 Extractor，llmFn 为 LLM 调用回调（与 agent 解耦）
 func NewExtractor(llmFn func(systemPrompt, userMsg string) string) *Extractor {
-	return &Extractor{llmFn: llmFn}
+	return &Extractor{llmFn: llmFn, normalizer: NewEntityNormalizer()}
 }
 
-const extractSystemPrompt = `你是一个信息抽取专家。从给定文本中抽取命名实体和实体间关系。
+const extractSystemPrompt = `你是信息抽取专家。只返回严格 JSON，不要输出解释或 Markdown。
+实体 type 只能是 Person, Organization, Location, Concept, Event, Product, Technology, System, Version, Metric, Unknown。
+关系 rel_type 只能是 RELATES_TO, IS_A, PART_OF, USES, DEPENDS_ON, CAUSES, REPLACES, PRODUCES, DESCRIBES, MENTIONS, WORKS_FOR, LOCATED_IN。
+每个关系的 from 和 to 必须出现在 entities 中。confidence 可选，范围 0 到 1。
+格式：{"entities":[{"name":"实体名","type":"System","aliases":["别名"],"confidence":0.9}],"relations":[{"from":"实体A","to":"实体B","rel_type":"USES","confidence":0.8}]}
+没有结果时返回 {"entities":[],"relations":[]}`
 
-实体类型（type 字段只能用以下值）：
-- Person（人物）
-- Organization（组织/公司/机构）
-- Location（地点/地区）
-- Concept（概念/技术/思想）
-- Event（事件）
-- Product（产品/工具）
-- Unknown（其他）
-
-关系类型（rel_type 字段只能用以下值）：
-- RELATES_TO（相关）
-- PART_OF（属于/是...的一部分）
-- CAUSES（导致/引发）
-- DESCRIBES（描述/介绍）
-- MENTIONS（提及）
-- WORKS_FOR（工作于）
-- LOCATED_IN（位于）
-
-输出格式（只输出 JSON，不加任何说明）：
-{
-  "entities": [{"name":"实体名","type":"类型"}],
-  "relations": [{"from":"实体A","to":"实体B","rel_type":"关系类型"}]
-}
-
-如果文本中没有可抽取的实体，输出 {"entities":[],"relations":[]}`
-
-// Extract 从单段文本中抽取实体和关系
-// 若 LLM 不可用或解析失败，返回空结果（不影响主流程）
 func (e *Extractor) Extract(text string) ExtractResult {
 	if e.llmFn == nil || strings.TrimSpace(text) == "" {
 		return ExtractResult{}
 	}
-
-	raw := e.llmFn(extractSystemPrompt, "文本：\n"+text)
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
-
+	raw := strings.TrimSpace(e.llmFn(extractSystemPrompt, "文本：\n"+text))
+	raw = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(raw, "```json"), "```"), "```"))
 	var result ExtractResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		log.Printf("⚠️  实体关系抽取解析失败: %v（原始输出: %.100s）", err, raw)
 		return ExtractResult{}
 	}
 
-	// 清洗：去除空名称，规范 type
 	cleaned := ExtractResult{}
-	seen := make(map[string]bool)
+	bySurface := make(map[string]string)
+	seenEntities := make(map[string]bool)
 	for _, ent := range result.Entities {
-		ent.Name = strings.TrimSpace(ent.Name)
-		if ent.Name == "" || seen[ent.Name] {
+		ent.Name = e.normalizer.DisplayName(ent.Name)
+		if ent.Name == "" {
 			continue
 		}
-		if !isValidEntityType(ent.Type) {
-			ent.Type = EntityUnknown
+		ent.Type = NormalizeEntityType(ent.Type)
+		key := string(ent.Type) + "|" + e.normalizer.Normalize(ent.Name)
+		if seenEntities[key] {
+			continue
 		}
+		ent.Aliases = cleanAliases(e.normalizer, ent.Name, ent.Aliases)
+		ent.Confidence = clampConfidence(ent.Confidence)
 		cleaned.Entities = append(cleaned.Entities, ent)
-		seen[ent.Name] = true
+		seenEntities[key] = true
+		bySurface[e.normalizer.Normalize(ent.Name)] = ent.Name
+		for _, alias := range ent.Aliases {
+			bySurface[e.normalizer.Normalize(alias)] = ent.Name
+		}
 	}
+
+	seenRelations := make(map[string]bool)
 	for _, rel := range result.Relations {
-		rel.FromName = strings.TrimSpace(rel.FromName)
-		rel.ToName = strings.TrimSpace(rel.ToName)
-		if rel.FromName == "" || rel.ToName == "" || rel.RelType == "" {
+		from, fromOK := bySurface[e.normalizer.Normalize(rel.FromName)]
+		to, toOK := bySurface[e.normalizer.Normalize(rel.ToName)]
+		if !fromOK || !toOK {
 			continue
 		}
-		if !isValidRelType(rel.RelType) {
-			rel.RelType = "RELATES_TO"
+		rel.FromName, rel.ToName = from, to
+		rel.RelType = NormalizeRelationType(rel.RelType)
+		rel.Confidence = clampConfidence(rel.Confidence)
+		key := from + "|" + to + "|" + rel.RelType
+		if seenRelations[key] {
+			continue
 		}
+		seenRelations[key] = true
 		cleaned.Relations = append(cleaned.Relations, rel)
 	}
 	return cleaned
 }
 
-func isValidEntityType(t EntityType) bool {
-	switch t {
-	case EntityPerson, EntityOrg, EntityLocation, EntityConcept,
-		EntityEvent, EntityProduct, EntityUnknown:
-		return true
+func cleanAliases(n EntityNormalizer, canonical string, aliases []string) []string {
+	canonicalNorm := n.Normalize(canonical)
+	seen := map[string]bool{canonicalNorm: true}
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		alias = n.DisplayName(alias)
+		normAlias := n.Normalize(alias)
+		if normAlias == "" || seen[normAlias] {
+			continue
+		}
+		seen[normAlias] = true
+		out = append(out, alias)
 	}
-	return false
+	return out
 }
 
-func isValidRelType(r string) bool {
-	switch r {
-	case "RELATES_TO", "PART_OF", "CAUSES", "DESCRIBES",
-		"MENTIONS", "WORKS_FOR", "LOCATED_IN":
-		return true
+func clampConfidence(v float64) float64 {
+	if v <= 0 {
+		return 1
 	}
-	return false
+	if v > 1 {
+		return 1
+	}
+	return v
 }
+
+func NormalizeRelationType(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	value = strings.NewReplacer("-", "_", " ", "_").Replace(value)
+	switch value {
+	case RelationRelatesTo, RelationIsA, RelationPartOf, RelationUses,
+		RelationDependsOn, RelationCauses, RelationReplaces, RelationProduces,
+		RelationDescribes, RelationMentions, RelationWorksFor, RelationLocatedIn:
+		return value
+	case "BELONGS_TO", "COMPONENT_OF":
+		return RelationPartOf
+	case "UTILIZES", "USE":
+		return RelationUses
+	case "REQUIRES", "RELY_ON", "RELIES_ON":
+		return RelationDependsOn
+	case "LEADS_TO", "RESULTS_IN":
+		return RelationCauses
+	case "EMPLOYED_BY":
+		return RelationWorksFor
+	default:
+		return RelationRelatesTo
+	}
+}
+
+func isValidEntityType(t EntityType) bool { return NormalizeEntityType(t) == t }
+func isValidRelType(r string) bool        { return NormalizeRelationType(r) == r }
