@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,7 +74,7 @@ type KafkaConfig struct {
 	KafkaTopic   string
 }
 
-// Neo4jConfig 知识图谱后端
+// Neo4jConfig 知识图谱后端（含 LightRAG 扩展参数）
 type Neo4jConfig struct {
 	Neo4jURI      string
 	Neo4jUser     string
@@ -81,6 +82,15 @@ type Neo4jConfig struct {
 	KGMaxHops     int     // 图遍历最大跳数
 	KGWeight      float64 // 图检索在 RRF 中的权重
 	KGEnabled     bool    // 是否启用知识图谱
+
+	// ── LightRAG 扩展参数 ──
+	KGEnableGleaning  bool     // 启用 gleaning 迭代精炼
+	KGMaxGleaning     int      // 最大 gleaning 迭代次数
+	KGVectorWeight    float64  // 向量相似度 vs 图结构权重
+	KGVectorDim       int      // KG 实体/关系向量维度
+	KGEnableDualLevel bool     // 启用双层次检索
+	KGEntityTypes     []string // 可配置实体类型
+	KGRelationTypes   []string // 可配置关系类型
 }
 
 // StorageConfig 聚合所有外部存储/连接配置
@@ -259,12 +269,19 @@ type yamlFile struct {
 		APIURL string `yaml:"api_url"`
 	} `yaml:"search"`
 	Neo4j struct {
-		URI      string  `yaml:"uri"`
-		User     string  `yaml:"user"`
-		Password string  `yaml:"password"`
-		MaxHops  int     `yaml:"max_hops"`
-		Weight   float64 `yaml:"weight"`
-		Enabled  bool    `yaml:"enabled"`
+		URI             string   `yaml:"uri"`
+		User            string   `yaml:"user"`
+		Password        string   `yaml:"password"`
+		MaxHops         int      `yaml:"max_hops"`
+		Weight          float64  `yaml:"weight"`
+		Enabled         bool     `yaml:"enabled"`
+		EnableGleaning  bool     `yaml:"enable_gleaning"`
+		MaxGleaning     int      `yaml:"max_gleaning"`
+		VectorWeight    float64  `yaml:"vector_weight"`
+		VectorDim       int      `yaml:"vector_dim"`
+		EnableDualLevel bool     `yaml:"enable_dual_level"`
+		EntityTypes     []string `yaml:"entity_types"`
+		RelationTypes   []string `yaml:"relation_types"`
 	} `yaml:"neo4j"`
 	Sandbox struct {
 		Enabled         bool   `yaml:"enabled"`
@@ -292,10 +309,13 @@ type yamlFile struct {
 
 // DefaultConfig 从 config/config.yaml 加载配置
 func DefaultConfig() *APIConfig {
+	loadLocalEnv(".env")
+
 	data, err := os.ReadFile("config/config.yaml")
 	if err != nil {
 		log.Fatalf("读取 config/config.yaml 失败: %v", err)
 	}
+	data = []byte(os.ExpandEnv(string(data)))
 
 	// 严格解析：未知字段直接报错，避免 yaml 键名拼错（如 api-key vs api_key）
 	// 时被静默忽略，运行时才发现 LLM/Embedding 走了 mock 模式。
@@ -343,12 +363,19 @@ func DefaultConfig() *APIConfig {
 				KafkaTopic:   y.Kafka.Topic,
 			},
 			Neo4jConfig: Neo4jConfig{
-				Neo4jURI:      y.Neo4j.URI,
-				Neo4jUser:     y.Neo4j.User,
-				Neo4jPassword: y.Neo4j.Password,
-				KGMaxHops:     y.Neo4j.MaxHops,
-				KGWeight:      y.Neo4j.Weight,
-				KGEnabled:     y.Neo4j.Enabled,
+				Neo4jURI:          y.Neo4j.URI,
+				Neo4jUser:         y.Neo4j.User,
+				Neo4jPassword:     y.Neo4j.Password,
+				KGMaxHops:         y.Neo4j.MaxHops,
+				KGWeight:          y.Neo4j.Weight,
+				KGEnabled:         y.Neo4j.Enabled,
+				KGEnableGleaning:  y.Neo4j.EnableGleaning,
+				KGMaxGleaning:     y.Neo4j.MaxGleaning,
+				KGVectorWeight:    y.Neo4j.VectorWeight,
+				KGVectorDim:       y.Neo4j.VectorDim,
+				KGEnableDualLevel: y.Neo4j.EnableDualLevel,
+				KGEntityTypes:     y.Neo4j.EntityTypes,
+				KGRelationTypes:   y.Neo4j.RelationTypes,
 			},
 		},
 		RAGConfig: RAGConfig{
@@ -412,6 +439,34 @@ func DefaultConfig() *APIConfig {
 	return c
 }
 
+// loadLocalEnv loads KEY=VALUE pairs from a local .env file without overwriting
+// variables already provided by the process environment.
+func loadLocalEnv(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if err := os.Setenv(key, value); err != nil {
+			log.Printf("⚠️  加载本地环境变量失败 (%s): %v", key, err)
+		}
+	}
+}
+
 // applyDefaults 为零值字段填充合理默认值
 func applyDefaults(c *APIConfig) {
 	// RAG 混合检索默认值
@@ -459,6 +514,24 @@ func applyDefaults(c *APIConfig) {
 	}
 	if c.KGWeight <= 0 {
 		c.KGWeight = 0.3
+	}
+	if c.KGMaxGleaning <= 0 {
+		c.KGMaxGleaning = 1
+	}
+	if c.KGVectorWeight <= 0 {
+		c.KGVectorWeight = 0.5
+	}
+	if c.KGVectorDim <= 0 {
+		c.KGVectorDim = c.RAGMilvusDim
+	}
+	if c.KGVectorDim <= 0 {
+		c.KGVectorDim = 1024
+	}
+	if len(c.KGEntityTypes) == 0 {
+		c.KGEntityTypes = []string{"Person", "Organization", "Location", "Concept", "Event", "Product", "Unknown"}
+	}
+	if len(c.KGRelationTypes) == 0 {
+		c.KGRelationTypes = []string{"RELATES_TO", "PART_OF", "CAUSES", "DESCRIBES", "MENTIONS", "WORKS_FOR", "LOCATED_IN"}
 	}
 
 	// 沙箱默认值

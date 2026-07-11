@@ -6,6 +6,8 @@
 *.test
 *.out
 /.gocache/
+/.gomodcache/
+.data/
 
 # IDE
 /.idea/
@@ -20,3 +22,18 @@
 # Local env overrides
 .env
 .env.local
+
+# Local integration credentials
+.mcp.json
+
+# Local JavaScript dependencies
+node_modules/
+
+# Local resume generation artifacts
+gen_resume.js
+fix_quotes.py
+package.json
+package-lock.json
+resume_developer.docx
+resume_page-*.jpg
+resume_png_page-*.png

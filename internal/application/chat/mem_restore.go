@@ -59,11 +59,26 @@ func (a *UnifiedAgent) restoreRAGFromDB() {
 	log.Printf("✅ RAG chunks 恢复：%d 条", len(chunks))
 }
 
-// initKnowledgeGraph 初始化 Neo4j 知识图谱存储，并注入到 RAG 引擎 + GraphMemory
+// initKnowledgeGraph 初始化 Neo4j 知识图谱存储（LightRAG 范式），并注入到 RAG 引擎 + GraphMemory。
+//
+// LightRAG 扩展（arXiv:2410.05779）：
+//   - 双层次向量索引（实体名称 + 关系关键词 → Milvus）
+//   - Gleaning 迭代精炼抽取
+//   - 双层次检索（HL/LL 关键词分离）
+//   - 所有扩展均可通过 config 开关控制，不可用时自动降级
 func (a *UnifiedAgent) initKnowledgeGraph() {
-	kg := knowledge.NewKGStore(a.cfg, func(systemPrompt, userMsg string) string {
-		return a.llm.Chat(systemPrompt, []llm.Message{{Role: "user", Content: userMsg}})
-	})
+	kgCfg := knowledge.KGStoreConfig{
+		Config: a.cfg,
+		LLMFn: func(systemPrompt, userMsg string) string {
+			return a.llm.Chat(systemPrompt, []llm.Message{{Role: "user", Content: userMsg}})
+		},
+		EmbedFn: func(text string) ([]float64, error) {
+			return a.llm.Embed(text)
+		},
+		MilvusClient: a.repos.ragChunk.MilvusClient(),
+	}
+
+	kg := knowledge.NewKGStoreWithDeps(kgCfg)
 	a.kg = kg
 	a.rag.SetKGStore(kg)
 
@@ -73,7 +88,11 @@ func (a *UnifiedAgent) initKnowledgeGraph() {
 	a.mem.attachGraph(gm)
 
 	if kg.Available() {
-		log.Printf("🕸️  知识图谱已就绪（Neo4j），RAG 升级为三路混合检索，记忆系统已接入图层")
+		vectorStatus := "向量路径不可用"
+		if kg.VectorAvailable() {
+			vectorStatus = "双层次向量检索已启用"
+		}
+		log.Printf("🕸️  知识图谱已就绪（Neo4j + LightRAG 范式），%s，RAG 升级为三路混合检索，记忆系统已接入图层", vectorStatus)
 	} else {
 		log.Printf("ℹ️  Neo4j 不可用，RAG 保持双路检索，记忆系统退化为纯向量模式")
 	}

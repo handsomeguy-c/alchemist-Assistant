@@ -30,6 +30,9 @@ type Row struct {
 	ID            int64
 	Content       string
 	ParentContent string
+	DocumentID    string
+	VersionID     string
+	Section       string
 }
 
 // ESHit 是 ES BM25 检索的单条结果
@@ -44,6 +47,12 @@ type MilvusHit struct {
 	Distance float32
 }
 
+type Metadata struct {
+	DocumentID string
+	VersionID  string
+	Section    string
+}
+
 // Repo RAG chunk 综合仓储接口
 type Repo interface {
 	// 写入
@@ -51,6 +60,7 @@ type Repo interface {
 	// SavePGWithParent 写入子块同时关联父块原文（small-to-big）
 	// parentContent 为空字符串时等价于 SavePG
 	SavePGWithParent(docHash string, chunkIdx int, content, parentContent string, embeddingJSON []byte) (int64, error)
+	SavePGWithMetadata(docHash string, chunkIdx int, content, parentContent string, embeddingJSON []byte, metadata Metadata) (int64, error)
 	IndexES(pgID int64, content, docHash string, chunkIdx int) error
 	InsertMilvus(pgIDs []int64, contents []string, embeddings [][]float32) error
 	// 读取
@@ -64,8 +74,11 @@ type Repo interface {
 	// 启动初始化（创建 collection / index）
 	Init(dim int)
 	// 后端可用性
+	PGAvailable() bool
 	MilvusAvailable() bool
 	ESAvailable() bool
+	// MilvusClient 暴露底层 Milvus 客户端（供 KG 向量索引复用同一连接）
+	MilvusClient() milvusClient.Client
 }
 
 // Store 是默认实现，组合三个底层 client
@@ -83,8 +96,14 @@ func NewStore(pg *sql.DB, milvus milvusClient.Client, esClient *es.Client) *Stor
 // MilvusAvailable 报告 Milvus 是否可用
 func (s *Store) MilvusAvailable() bool { return s.milvus != nil }
 
+// MilvusClient 暴露底层 Milvus 客户端（供 KG 向量索引复用同一连接）
+func (s *Store) MilvusClient() milvusClient.Client { return s.milvus }
+
 // ESAvailable 报告 ES 是否可用
 func (s *Store) ESAvailable() bool { return s.es != nil }
+
+// PGAvailable 报告 PostgreSQL 是否可用
+func (s *Store) PGAvailable() bool { return s.pg != nil }
 
 // ─────────────────────────────── PG ────────────────────────────────────────
 
@@ -95,20 +114,27 @@ func (s *Store) SavePG(docHash string, chunkIdx int, content string, embeddingJS
 
 // SavePGWithParent upsert chunk 到 PG，同时写入父块原文用于 small-to-big 检索
 func (s *Store) SavePGWithParent(docHash string, chunkIdx int, content, parentContent string, embeddingJSON []byte) (int64, error) {
+	return s.SavePGWithMetadata(docHash, chunkIdx, content, parentContent, embeddingJSON, Metadata{})
+}
+
+func (s *Store) SavePGWithMetadata(docHash string, chunkIdx int, content, parentContent string, embeddingJSON []byte, metadata Metadata) (int64, error) {
 	if s.pg == nil {
 		return -1, fmt.Errorf("postgres not connected")
 	}
 	// parentContent 走 NULLIF：空串当 NULL 存，老逻辑回填一致
 	var id int64
 	err := s.pg.QueryRow(
-		`INSERT INTO rag_chunks (doc_hash, chunk_idx, content, parent_content, embedding)
-		 VALUES ($1, $2, $3, NULLIF($4, ''), $5)
+		`INSERT INTO rag_chunks (doc_hash, chunk_idx, content, parent_content, embedding, document_id, version_id, section)
+		 VALUES ($1, $2, $3, NULLIF($4, ''), $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''))
 		 ON CONFLICT (doc_hash, chunk_idx) DO UPDATE
 		   SET content = EXCLUDED.content,
 		       parent_content = EXCLUDED.parent_content,
-		       embedding = EXCLUDED.embedding
+		       embedding = EXCLUDED.embedding,
+		       document_id = EXCLUDED.document_id,
+		       version_id = EXCLUDED.version_id,
+		       section = EXCLUDED.section
 		 RETURNING id`,
-		docHash, chunkIdx, content, parentContent, embeddingJSON,
+		docHash, chunkIdx, content, parentContent, embeddingJSON, metadata.DocumentID, metadata.VersionID, metadata.Section,
 	).Scan(&id)
 	if err != nil {
 		return -1, fmt.Errorf("save rag chunk failed: %w", err)
@@ -128,7 +154,7 @@ func (s *Store) LoadByIDs(ids []int64) ([]Row, error) {
 		args[i] = id
 	}
 	query := fmt.Sprintf(
-		"SELECT id, content, COALESCE(parent_content, '') FROM rag_chunks WHERE id IN (%s)",
+		"SELECT id, content, COALESCE(parent_content, ''), COALESCE(document_id, ''), COALESCE(version_id, ''), COALESCE(section, '') FROM rag_chunks WHERE id IN (%s)",
 		strings.Join(placeholders, ","),
 	)
 	rows, err := s.pg.Query(query, args...)
@@ -139,7 +165,7 @@ func (s *Store) LoadByIDs(ids []int64) ([]Row, error) {
 	var result []Row
 	for rows.Next() {
 		var r Row
-		if err := rows.Scan(&r.ID, &r.Content, &r.ParentContent); err == nil {
+		if err := rows.Scan(&r.ID, &r.Content, &r.ParentContent, &r.DocumentID, &r.VersionID, &r.Section); err == nil {
 			result = append(result, r)
 		}
 	}
@@ -151,7 +177,7 @@ func (s *Store) LoadAll() ([]Row, error) {
 	if s.pg == nil {
 		return nil, fmt.Errorf("postgres not connected")
 	}
-	rows, err := s.pg.Query("SELECT id, content, COALESCE(parent_content, '') FROM rag_chunks ORDER BY id")
+	rows, err := s.pg.Query("SELECT id, content, COALESCE(parent_content, ''), COALESCE(document_id, ''), COALESCE(version_id, ''), COALESCE(section, '') FROM rag_chunks ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +185,7 @@ func (s *Store) LoadAll() ([]Row, error) {
 	var result []Row
 	for rows.Next() {
 		var r Row
-		if err := rows.Scan(&r.ID, &r.Content, &r.ParentContent); err == nil {
+		if err := rows.Scan(&r.ID, &r.Content, &r.ParentContent, &r.DocumentID, &r.VersionID, &r.Section); err == nil {
 			result = append(result, r)
 		}
 	}

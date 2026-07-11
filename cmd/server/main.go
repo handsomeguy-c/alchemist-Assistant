@@ -23,6 +23,7 @@ import (
 	"alchemist-Assistant/internal/application/chat"
 	"alchemist-Assistant/internal/infrastructure/eventbus"
 	"alchemist-Assistant/internal/infrastructure/persistence/chathistory"
+	"alchemist-Assistant/internal/infrastructure/persistence/documentrepo"
 	"alchemist-Assistant/internal/infrastructure/persistence/longterm"
 	"alchemist-Assistant/internal/infrastructure/persistence/preference"
 	"alchemist-Assistant/internal/infrastructure/persistence/ragchunk"
@@ -57,6 +58,7 @@ func main() {
 		SnapRepo:     snapshot.NewPGRepo(pgDB),
 		LTMRepo:      longterm.NewPGRepo(pgDB),
 		RAGChunkRepo: ragchunk.NewStore(pgDB, milvusClient, esClient),
+		DocumentRepo: documentrepo.NewStore(pgDB, ".data/documents"),
 		Events:       eventbus.NewKafkaPublisher(kafkaWriter, kafkaStatus == "connected"),
 		InfraStatus: map[string]string{
 			"milvus":        milvusStatus,

@@ -1,7 +1,7 @@
 # 对话模型配置
 llm:
   api_url: https://api.deepseek.com/chat/completions
-  api_key: "你的apikey"
+  api_key: "${DEEPSEEK_API_KEY}"
   model: deepseek-v4-pro
   temperature: 0.7
 embedding:
@@ -80,6 +80,7 @@ search:
   api_url: "https://api.tavily.com/search"
 
 # ===== 知识图谱（Neo4j，可选，不可用时跳过图检索）=====
+# LightRAG 范式（arXiv:2410.05779）：双层次索引 + 向量匹配 + 子图扩展
 neo4j:
   uri: "bolt://localhost:7687"
   user: "neo4j"
@@ -87,6 +88,29 @@ neo4j:
   max_hops: 2        # 图遍历最大跳数
   weight: 0.3        # 图检索在 RRF 融合中的权重
   enabled: true      # false 时完全跳过知识图谱
+
+  # ── LightRAG 扩展参数 ──
+  enable_gleaning: true      # 启用 gleaning 迭代精炼（找出遗漏实体）
+  max_gleaning: 1            # 最大 gleaning 迭代次数（0=禁用）
+  vector_weight: 0.5         # 向量相似度权重（0-1，越高向量越重要，越低图结构越重要）
+  vector_dim: 2048           # KG 实体/关系向量维度（默认对齐 rag_milvus_dim）
+  enable_dual_level: true    # 启用双层次检索（HL/LL 关键词分离）
+  entity_types:              # 可配置的实体类型（为空使用默认）
+    - "Person"
+    - "Organization"
+    - "Location"
+    - "Concept"
+    - "Event"
+    - "Product"
+    - "Unknown"
+  relation_types:            # 可配置的关系类型（为空使用默认）
+    - "RELATES_TO"
+    - "PART_OF"
+    - "CAUSES"
+    - "DESCRIBES"
+    - "MENTIONS"
+    - "WORKS_FOR"
+    - "LOCATED_IN"
 
 # ===== 沙箱执行（用于终端命令工具）=====
 sandbox:

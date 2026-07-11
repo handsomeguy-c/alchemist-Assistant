@@ -380,7 +380,7 @@ docker compose up -d --build
 
 编辑 `config/config.yaml`，填入 API Key：
 
-- `llm.api_key` — 火山引擎 Ark 对话模型 API Key
+- `DEEPSEEK_API_KEY` — DeepSeek 对话模型 API Key，可写入本地 `.env`
 - `embedding.api_key` — 火山引擎 Embedding 模型 API Key
 - `search.api_key` — Tavily 搜索 API Key（可选）
 
@@ -395,8 +395,8 @@ docker compose up -d --build
 │   ├── config.go
 │   └── config.yaml
 ├── internal/
-│   ├── application/          应用编排层（chat agent / ReAct / graph runtime）
-│   ├── domain/               领域能力（RAG / promptctx / memory / sandbox / tool）
+│   ├── application/          应用编排层（chat / ReAct / graph runtime / sub-agent）
+│   ├── domain/               领域能力（document / RAG / memory / graph / tool）
 │   ├── infrastructure/       基础设施实现（LLM / persistence / platform / tool）
 │   └── interfaces/           HTTP API 路由处理
 ├── frontend/                 单文件前端 HTML

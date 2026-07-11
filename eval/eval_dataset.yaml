@@ -1,0 +1,189 @@
+# RAGAS 知识库评测数据集
+#
+# 评测目标：评估 Alchemist Assistant 的 RAG 检索增强生成质量
+# 领域：通用技术/人工智能知识
+#
+# 数据格式：
+#   - question: 用户问题
+#   - ground_truth: 标准答案
+#   - contexts: 期望检索到的上下文片段列表
+
+test_documents:
+  - id: doc_ai_basics
+    title: "人工智能基础知识"
+    content: |
+      # 人工智能基础知识
+
+      ## 什么是人工智能
+      人工智能（Artificial Intelligence，简称 AI）是计算机科学的一个分支，旨在创建能够模拟、延伸和扩展人类智能的系统。AI 系统可以执行通常需要人类智能才能完成的任务，包括视觉感知、语音识别、决策制定和语言翻译。
+
+      ## 机器学习
+      机器学习（Machine Learning）是 AI 的核心子领域。它使计算机能够从数据中学习，而无需明确编程。主要分为三类：
+      1. 监督学习（Supervised Learning）：使用标注数据训练模型，如分类和回归任务
+      2. 无监督学习（Unsupervised Learning）：从未标注数据中发现模式，如聚类和降维
+      3. 强化学习（Reinforcement Learning）：通过与环境交互和奖励信号来学习最优策略
+
+      ## 深度学习
+      深度学习（Deep Learning）是机器学习的一个子集，使用多层神经网络来处理复杂模式。深度学习的突破性应用包括：
+      - 卷积神经网络（CNN）：广泛用于图像识别和计算机视觉
+      - 循环神经网络（RNN）和 LSTM：用于序列数据处理，如自然语言处理
+      - Transformer 架构：2017年由 Google 提出，基于自注意力机制，现已成为 NLP 领域的主流架构
+
+      ## 大语言模型
+      大语言模型（Large Language Model，LLM）是基于 Transformer 架构的大规模预训练语言模型。代表性模型包括：
+      - GPT 系列（OpenAI）：GPT-3（1750亿参数）、GPT-4（多模态）
+      - Claude 系列（Anthropic）：以安全性和有用性著称
+      - DeepSeek 系列（深度求索）：DeepSeek-V2、DeepSeek-V3，采用 MoE（混合专家）架构
+      - LLaMA 系列（Meta）：开源模型，推动学术界研究
+
+      ## 检索增强生成（RAG）
+      检索增强生成（Retrieval-Augmented Generation）是一种结合信息检索和文本生成的技术。RAG 的工作流程：
+      1. 将用户查询向量化
+      2. 在知识库中进行相似度检索
+      3. 将检索到的相关文档片段作为上下文
+      4. LLM 基于上下文生成回答
+
+      RAG 的优势：
+      - 减少幻觉（Hallucination）：回答基于真实文档
+      - 知识可更新：无需重新训练模型
+      - 可追溯性：可以引用来源
+      - 领域专业化：可以针对特定领域知识库
+
+      ## 知识图谱
+      知识图谱（Knowledge Graph）是一种结构化的知识表示方式，由实体（节点）和关系（边）组成。在 RAG 系统中，知识图谱可以：
+      - 捕获实体间的语义关系
+      - 支持多跳推理
+      - 提供结构化的上下文信息
+      - 增强检索的覆盖率和准确性
+
+      ## 向量数据库
+      向量数据库（Vector Database）是专门用于存储和检索高维向量数据的数据库系统。常见的向量数据库包括：
+      - Milvus：开源向量数据库，支持多种索引类型
+      - Pinecone：全托管向量数据库服务
+      - Qdrant：高性能向量搜索引擎
+      - Weaviate：开源向量数据库，内置向量化模块
+
+  - id: doc_go_lang
+    title: "Go 语言高级特性"
+    content: |
+      # Go 语言高级特性
+
+      ## Go 语言概述
+      Go（又称 Golang）是 Google 开发的一种静态类型、编译型编程语言。由 Robert Griesemer、Rob Pike 和 Ken Thompson 于 2007 年设计，2009 年正式发布。Go 的设计目标是提供一种简单、高效、可靠的系统编程语言。
+
+      ## 并发模型
+      Go 的并发模型基于 CSP（Communicating Sequential Processes）理论：
+      - Goroutine：轻量级线程，由 Go 运行时管理，启动成本极低（约 2KB 栈空间）
+      - Channel：Goroutine 之间的通信管道，支持有缓冲和无缓冲两种模式
+      - Select 语句：多路复用 Channel 操作
+      - sync 包：提供 WaitGroup、Mutex、RWMutex 等传统同步原语
+
+      ## 内存管理
+      Go 使用自动垃圾回收（Garbage Collection），采用三色标记-清除算法：
+      - 并发 GC：GC 与用户代码并发执行，减少 STW（Stop The World）时间
+      - 写屏障（Write Barrier）：保证并发标记的正确性
+      - GOGC 参数：控制 GC 触发阈值，默认 100（堆增长 100% 时触发）
+
+      ## 接口与类型系统
+      Go 的接口采用隐式实现（Structural Typing）：
+      ```go
+      type Reader interface {
+          Read(p []byte) (n int, err error)
+      }
+      ```
+      - 任何实现了 Read 方法的类型自动满足 Reader 接口
+      - 空接口 interface{} 可接受任何类型的值
+      - Go 1.18 引入泛型（Generics），支持类型参数
+
+      ## 错误处理
+      Go 采用显式错误返回值模式：
+      - error 接口：包含 Error() string 方法
+      - 错误包装：fmt.Errorf("%w", err) 支持错误链
+      - errors.Is() 和 errors.As()：错误类型判断和提取
+      - panic/recover：处理不可恢复的运行时错误
+
+      ## 测试与工具链
+      Go 内置了丰富的工具链：
+      - go test：运行测试，支持基准测试（Benchmark）和示例测试（Example）
+      - go fmt：自动格式化代码
+      - go vet：静态分析工具
+      - go mod：依赖管理
+      - pprof：性能分析工具
+
+questions:
+  - id: q1
+    question: "什么是检索增强生成（RAG）？它有哪些优势？"
+    ground_truth: "检索增强生成（RAG）是一种结合信息检索和文本生成的技术。工作流程：将用户查询向量化，在知识库中进行相似度检索，将相关文档片段作为上下文提供给LLM生成回答。优势包括：减少幻觉、知识可更新无需重新训练、可追溯来源、支持领域专业化。"
+    expected_contexts:
+      - "检索增强生成（Retrieval-Augmented Generation）是一种结合信息检索和文本生成的技术"
+      - "减少幻觉（Hallucination）：回答基于真实文档"
+
+  - id: q2
+    question: "Transformer 架构是什么时候提出的？有什么特点？"
+    ground_truth: "Transformer 架构于2017年由 Google 提出，基于自注意力机制（Self-Attention），现已成为自然语言处理领域的主流架构。"
+    expected_contexts:
+      - "Transformer 架构：2017年由 Google 提出，基于自注意力机制"
+
+  - id: q3
+    question: "什么是大语言模型？请列举几个代表性模型。"
+    ground_truth: "大语言模型（LLM）是基于 Transformer 架构的大规模预训练语言模型。代表性模型包括：GPT 系列（OpenAI，如 GPT-3 1750亿参数、GPT-4 多模态）、Claude 系列（Anthropic，以安全性著称）、DeepSeek 系列（深度求索，采用 MoE 混合专家架构）、LLaMA 系列（Meta，开源模型）。"
+    expected_contexts:
+      - "大语言模型（Large Language Model，LLM）是基于 Transformer 架构的大规模预训练语言模型"
+      - "GPT 系列（OpenAI）：GPT-3（1750亿参数）"
+      - "DeepSeek 系列（深度求索）：DeepSeek-V2、DeepSeek-V3，采用 MoE（混合专家）架构"
+
+  - id: q4
+    question: "机器学习的三种主要类型是什么？简要说明每种类型。"
+    ground_truth: "机器学习分为三类：1. 监督学习：使用标注数据训练模型，如分类和回归任务；2. 无监督学习：从未标注数据中发现模式，如聚类和降维；3. 强化学习：通过与环境交互和奖励信号来学习最优策略。"
+    expected_contexts:
+      - "监督学习（Supervised Learning）：使用标注数据训练模型"
+      - "无监督学习（Unsupervised Learning）：从未标注数据中发现模式"
+      - "强化学习（Reinforcement Learning）：通过与环境交互和奖励信号来学习最优策略"
+
+  - id: q5
+    question: "知识图谱在 RAG 系统中有什么作用？"
+    ground_truth: "知识图谱在 RAG 系统中可以：1. 捕获实体间的语义关系；2. 支持多跳推理；3. 提供结构化的上下文信息；4. 增强检索的覆盖率和准确性。"
+    expected_contexts:
+      - "知识图谱（Knowledge Graph）是一种结构化的知识表示方式"
+      - "捕获实体间的语义关系"
+      - "支持多跳推理"
+
+  - id: q6
+    question: "Go 语言的并发模型基于什么理论？有哪些核心组件？"
+    ground_truth: "Go 的并发模型基于 CSP（Communicating Sequential Processes）理论。核心组件包括：Goroutine（轻量级线程，启动成本约 2KB 栈空间）、Channel（通信管道，支持有缓冲和无缓冲）、Select 语句（多路复用 Channel 操作）、sync 包（WaitGroup、Mutex、RWMutex 等同步原语）。"
+    expected_contexts:
+      - "Go 的并发模型基于 CSP（Communicating Sequential Processes）理论"
+      - "Goroutine：轻量级线程，由 Go 运行时管理，启动成本极低（约 2KB 栈空间）"
+      - "Channel：Goroutine 之间的通信管道"
+
+  - id: q7
+    question: "常见的向量数据库有哪些？"
+    ground_truth: "常见的向量数据库包括：Milvus（开源，支持多种索引类型）、Pinecone（全托管服务）、Qdrant（高性能向量搜索引擎）、Weaviate（开源，内置向量化模块）。"
+    expected_contexts:
+      - "Milvus：开源向量数据库，支持多种索引类型"
+      - "Pinecone：全托管向量数据库服务"
+      - "Qdrant：高性能向量搜索引擎"
+
+  - id: q8
+    question: "深度学习的代表性架构有哪些？各自的应用场景是什么？"
+    ground_truth: "深度学习的代表性架构包括：1. 卷积神经网络（CNN）：广泛用于图像识别和计算机视觉；2. 循环神经网络（RNN）和 LSTM：用于序列数据处理，如自然语言处理；3. Transformer 架构：2017年由 Google 提出，基于自注意力机制，现已成为 NLP 领域的主流架构。"
+    expected_contexts:
+      - "卷积神经网络（CNN）：广泛用于图像识别和计算机视觉"
+      - "循环神经网络（RNN）和 LSTM：用于序列数据处理"
+      - "Transformer 架构：2017年由 Google 提出"
+
+  - id: q9
+    question: "Go 语言的错误处理机制是怎样的？"
+    ground_truth: "Go 采用显式错误返回值模式。error 接口包含 Error() string 方法。支持错误包装（fmt.Errorf(\"%w\", err) 支持错误链）、错误类型判断和提取（errors.Is() 和 errors.As()）、以及 panic/recover 处理不可恢复的运行时错误。"
+    expected_contexts:
+      - "Go 采用显式错误返回值模式"
+      - "error 接口：包含 Error() string 方法"
+      - "错误包装：fmt.Errorf(\"%w\", err) 支持错误链"
+
+  - id: q10
+    question: "Go 语言的 GC 采用什么算法？有哪些关键参数？"
+    ground_truth: "Go 使用自动垃圾回收，采用三色标记-清除算法。特点包括：并发 GC（GC 与用户代码并发执行，减少 STW 时间）、写屏障（保证并发标记的正确性）、GOGC 参数控制 GC 触发阈值（默认 100，堆增长 100% 时触发）。"
+    expected_contexts:
+      - "Go 使用自动垃圾回收（Garbage Collection），采用三色标记-清除算法"
+      - "并发 GC：GC 与用户代码并发执行，减少 STW（Stop The World）时间"
+      - "GOGC 参数：控制 GC 触发阈值，默认 100"
