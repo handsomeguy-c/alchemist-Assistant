@@ -1,22 +1,2 @@
-# Build artifacts
-/final-agent
-/alchemist-assistant
-/bin/
-/dist/
-*.test
-*.out
-/.gocache/
-
-# IDE
-/.idea/
-/.vscode/
-
-# OS
-.DS_Store
-
-# Logs
-*.log
-
-# Local env overrides
-.env
-.env.local
+config.toml
+tmp-realtest-logs/

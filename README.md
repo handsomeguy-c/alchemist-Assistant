@@ -1,413 +1,316 @@
+<div align="center">
 
-# alchemist-Assistant炼丹师助手：多模态智能体系统
+# Sea-Mult-Agent
 
-alchemist-Assistant炼丹师助手 是一个面向个人与企业的多模态智能体系统，融合了检索增强生成（RAG）、三层记忆、知识图谱、沙箱执行与可恢复执行流，支持多轮对话、知识检索、工具调用与复杂推理。系统具备高可用性、可扩展性与工程落地能力。
+**ScholarAgent: 从论文理解到沙箱实验的多智能体科研执行系统**
 
-## 项目特性
+[![Go](https://img.shields.io/badge/Go-1.26.1-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111827)](https://react.dev/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-research%20prototype-orange)](#project-status)
 
-- **多阶段智能体核心**：支持纯对话、RAG 检索、单工具调用、多工具编排（ReAct）等多种智能体模式，自动路由。
-- **RAG 检索增强生成**：融合 Milvus 语义向量、Elasticsearch 关键词、Neo4j 知识图谱，三路 RRF 融合排序，自动降级，支持文档分块与异步实体关系抽取。
-- **三层记忆系统**：短期记忆（滑动窗口）、长期记忆（Embedding/TF）、用户偏好（LLM+规则），支持去重、合并、衰减、过期淘汰。
-- **图增强记忆**：长期记忆叠加 Neo4j 图层，支持 FOLLOWS、SIMILAR_TO、CAUSES、BELONGS_TO 等关系，提升历史联想与推理能力。
-- **工具链与可恢复执行**：内置时间、天气、搜索、RAG 检索、命令执行等工具，支持 ReAct 规划-执行-生成流程，任务快照与重试机制保障稳定性。
-- **沙箱执行**：支持 Docker / Local / Mock 三种沙箱后端，资源限制（CPU/内存/PID/网络），命令白名单安全校验。
-- **高可用基础设施**：PostgreSQL 持久化、Milvus/ES/Neo4j/Kafka 可选，自动优雅降级，适配多种部署环境。
+[快速开始](#quick-start) · [系统架构](#architecture) · [API](#api) · [实验记录](#reproduction) · [贡献指南](scholar-agent/docs/CONTRIBUTING.md)
 
----
+</div>
 
+![Sea-Mult-Agent architecture](ArchitectureDiagram.png)
 
-## 整体架构图
+Sea-Mult-Agent 面向论文阅读、代码仓库发现、环境准备、受控实验和结果分析等科研工作流。用户提交研究目标后，Planner 会生成 DAG，Scheduler 按依赖调度 Librarian、Coder、Sandbox 和 Data 等角色，并通过 SSE 将日志、状态和结构化产物实时推送到前端。
 
-```mermaid
-graph TB
-    subgraph Frontend["前端 (index.html)"]
-        CHAT["对话区"]
-        SIDEBAR["侧边栏<br/>知识库上传 / 近期对话"]
-        CTRL["控制栏<br/>知识库开关 / 工具选择"]
-    end
+> [!NOTE]
+> 本项目目前是具备持久化、恢复、审批、预算和受限沙箱能力的单机研究原型，不是已完成多租户安全认证的生产服务。Docker 沙箱仍具有较高宿主机权限，部署前请阅读[项目状态与安全说明](#project-status)。
 
-    subgraph Router["智能路由层"]
-        R["Router"]
-    end
+![ScholarAgent dashboard](scholar-agent/docs/assets/scholar-agent-dashboard.png)
 
-    subgraph Core["核心能力"]
-        CHAT_ENGINE["Stage 1: 多轮对话<br/>LLM + STM 历史注入"]
-        RAG_ENGINE["Stage 2: RAG<br/>Milvus + ES + Neo4j 三路检索 → RRF融合 → LLM合成"]
-        TOOL_ENGINE["Stage 3: 工具调用<br/>time / weather / search / exec_command"]
-        REACT_ENGINE["Stage 4: ReAct<br/>Planner → Executor → Generator"]
-    end
+## Why Sea-Mult-Agent
 
-    subgraph Memory["Stage 5: 三层记忆"]
-        STM["短期记忆<br/>滑动窗口"]
-        LTM["长期记忆<br/>Embedding语义 + Neo4j图关系"]
-        PREF["用户偏好<br/>LLM NER提取"]
-    end
+| 能力 | 当前实现 |
+|---|---|
+| **面向科研的任务规划** | 将论文复现、代码执行、框架对比等目标拆解为可执行 DAG |
+| **专业 Agent 路由** | 根据任务类型路由到 Librarian、Coder、Sandbox、Data 或 Chat 角色 |
+| **真实隔离执行** | 通过独立 Go 沙箱服务调用原生 Docker，支持持久工作区与产物回传 |
+| **仓库优先的论文复现** | 发现或使用指定 GitHub 仓库，准备依赖并运行受控 smoke 实验 |
+| **预算受限的消融设计** | ToT 评估参数、模块、数据规模、随机种子和运行成本候选，只执行预算内的高价值组合 |
+| **研究材料上传** | 在工作台附加论文、配置、笔记和小型数据文件，按用户隔离并传入复现流程 |
+| **科研仓库 Coding Agent** | 对论文代码做受限调试、补丁回滚和重跑，也能为自有数据生成仓库 Benchmark 适配器 |
+| **自有数据仓库评测** | Research Coding Agent 生成受限适配器，经 8 条预检、ReAct 修复和指标重算后运行用户数据 |
+| **逐主张复现验收** | 实验前冻结分层 Rubric，实验后把论文主张、判定准则与真实 Artifact 绑定成可视化证据图 |
+| **实时可观测执行** | SSE 推送计划、节点、日志和 Artifact 事件，前端同步展示执行状态 |
+| **可靠执行与治理** | 任务租约、迟到结果隔离、取消/重试、持久化恢复、预算和人工审批 |
+| **研究工作台** | 集成对话、PDF 阅读、DAG 看板、节点日志、代码、报告与图表视图 |
 
-    subgraph Harness["Stage 6: 稳定执行"]
-        RETRY["重试机制"]
-        SNAP["快照恢复"]
-    end
+## Quick Start
 
-    subgraph Sandbox["沙箱执行"]
-        DOCKER["Docker 后端<br/>资源隔离 + 安全限制"]
-        LOCAL["Local 后端"]
-        MOCK["Mock 后端"]
-    end
+### Prerequisites
 
-    subgraph Infra["基础设施 (全部可选, 优雅降级)"]
-        PG["PostgreSQL<br/>偏好/LTM/RAG Chunk持久化"]
-        MIL["Milvus<br/>语义向量近邻搜索"]
-        ES["Elasticsearch<br/>BM25全文检索"]
-        NEO["Neo4j<br/>知识图谱 + 图增强记忆"]
-        KAFKA["Kafka<br/>事件流"]
-    end
+- Docker Engine 20.10+ 与 Docker Compose v2
+- Git
+- 一个 OpenAI-compatible LLM API Key
+- 本地开发时需要 Go（支持 `GOTOOLCHAIN=auto`）与 Node.js 20+
 
-    CHAT --> R
-    CTRL --> R
-
-    R -->|纯对话| CHAT_ENGINE
-    R -->|知识检索| RAG_ENGINE
-    R -->|单工具| TOOL_ENGINE
-    R -->|多工具编排| REACT_ENGINE
-
-    CHAT_ENGINE --> Memory
-    RAG_ENGINE --> Memory
-    TOOL_ENGINE --> Memory
-    REACT_ENGINE --> Memory
-    REACT_ENGINE --> Harness
-
-    TOOL_ENGINE --> Sandbox
-    REACT_ENGINE --> Sandbox
-    Sandbox --> DOCKER
-    Sandbox --> LOCAL
-    Sandbox --> MOCK
-
-    RETRY --> SNAP
-    SNAP --> PG
-
-    STM -.->|多轮历史| CHAT_ENGINE
-    LTM -.->|跨会话恢复| CHAT_ENGINE
-    PREF -.->|个性化上下文| CHAT_ENGINE
-
-    LTM --> PG
-    LTM --> NEO
-    PREF --> PG
-    RAG_ENGINE --> MIL
-    RAG_ENGINE --> ES
-    RAG_ENGINE --> NEO
-    CHAT_ENGINE --> KAFKA
-
-    SIDEBAR -->|上传文档| RAG_ENGINE
-```
-
-
-## 核心流程时序图
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant FE as 前端
-    participant Router as 智能路由
-    participant LLM as LLM API
-    participant Planner as Planner LLM
-    participant Executor as Executor
-    participant Tool as Tool / RAG / Sandbox
-    participant Generator as Generator LLM
-    participant Memory as 三层记忆
-    participant DB as PostgreSQL
-
-    User->>FE: 输入消息 + 选择工具
-    FE->>Router: POST /api/chat {message, tools}
-
-    alt 纯对话 (无工具)
-        Router->>Memory: 加载 STM 历史 + LTM + 偏好
-        Memory-->>Router: 上下文消息列表
-        Router->>LLM: Chat(systemPrompt + 历史 + 当前消息)
-        LLM-->>Router: 自然语言回答
-        Router->>Memory: 异步提取偏好 + 存储长期记忆
-
-    else 工具编排 (ReAct)
-        Router->>Planner: 分析query + 工具列表 → 执行计划
-        Planner-->>Router: [{tool, params, reason}, ...]
-
-        loop 按计划逐步执行
-            Router->>Executor: 执行 tool(params)
-            Executor->>Tool: 调用具体工具
-            Tool-->>Executor: 观察结果
-            Executor-->>Router: 步骤结果 (思考 → 动作 → 观察)
-            Router->>DB: 保存快照
-        end
-
-        Router->>Generator: 合成所有观察 → 最终答案
-        Generator-->>Router: 自然语言回答
-        Router->>Memory: 异步存储长期记忆 + 提取偏好
-    end
-
-    Router-->>FE: {answer, steps, memories}
-    FE-->>User: 渲染回答 + 思考过程
-```
-
-
-## RAG 三路混合检索流程图
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant RAG as RAG Engine
-    participant EMB as Embedding API
-    participant MIL as Milvus
-    participant ES as Elasticsearch
-    participant NEO as Neo4j
-    participant PG as PostgreSQL
-    participant LLM as LLM API
-
-    User->>RAG: 查询: "量子计算的应用领域"
-    RAG->>EMB: Embed(query)
-    EMB-->>RAG: query向量 [0.12, -0.34, ...]
-
-    par 三路并行检索
-        RAG->>MIL: MilvusSearch(query向量, topK)
-        MIL-->>RAG: 语义结果 [{pg_id, distance}, ...]
-        RAG->>ES: BM25Search(query, topK)
-        ES-->>RAG: 关键词结果 [{pg_id, score}, ...]
-        RAG->>NEO: GraphSearch(实体, maxHops=2)
-        NEO-->>RAG: 图谱结果 [{pg_id, weight}, ...]
-    end
-
-    RAG->>RAG: RRF融合排序<br/>score = Σ(1/(k+rank_i)) × weight_i<br/>语义0.7 + BM25权重 + 图0.3
-
-    RAG->>PG: LoadRAGChunksByIDs(top_pg_ids)
-    PG-->>RAG: [{id, content}, ...]
-
-    RAG->>LLM: Chat(系统提示 + 检索上下文 + 用户问题)
-    LLM-->>RAG: 基于知识的回答
-
-    RAG-->>User: 回答 + 引用来源
-```
-
-
-## 记忆系统详细流程图
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant Agent as Agent
-    participant STM as 短期记忆<br/>(滑动窗口 N×2)
-    participant LLM as LLM API
-    participant EMB as Embedding API
-    participant LTM as 长期记忆<br/>(Embedding+TF双层)
-    participant GRAPH as Neo4j图增强
-    participant PREF as 用户偏好<br/>(LLM NER+规则双重)
-    participant PG as PostgreSQL
-
-    Note over User,PG: ═══════════ 服务启动: 跨会话恢复 ═══════════
-    Agent->>PG: LoadPreferences(userID)
-    PG-->>Agent: 历史偏好 [{key, value}, ...]
-    Agent->>PREF: SaveBatch(恢复偏好到内存)
-    Agent->>PG: LoadLongTermItems()
-    PG-->>Agent: 历史LTM [{id, content, embedding, importance}, ...]
-    Agent->>LTM: StoreItem(逐条恢复到内存索引)
-    Note right of LTM: 重建TF词表<br/>恢复Embedding向量
-    Agent->>GRAPH: 重建记忆节点与关系
-    Agent->>STM: 初始化空窗口
-
-    Note over User,PG: ═══════════ 每轮对话: 读取阶段 ═══════════
-    User->>Agent: "你好，我叫小明，我喜欢打篮球"
-    Agent->>STM: Add(user, 消息)
-
-    Agent->>LTM: Recall(query, topK=3, queryEmbedding?)
-    alt Embedding API 可用
-        Agent->>EMB: Embed(query)
-        EMB-->>LTM: query向量
-        loop 遍历所有LTM条目
-            LTM->>LTM: cosine(queryEmb, itemEmb)
-            LTM->>LTM: score = sim×0.7 + importance×0.3
-            alt score ≥ 0.4 阈值
-                LTM->>LTM: 更新item.LastAccessed
-                LTM->>LTM: 加入候选集
-            else score < 0.4
-                Note right of LTM: 过滤噪声，不注入
-            end
-        end
-    else 降级: TF词袋
-        LTM->>LTM: buildVocab(query) 扩充词表
-        LTM->>LTM: textToVector(query) → TF向量
-        loop 遍历所有LTM条目
-            LTM->>LTM: cosine(queryTF, itemTF)
-            LTM->>LTM: score = sim×0.7 + importance×0.3
-        end
-    end
-    LTM-->>Agent: 召回记忆 [{content, score}, ...]
-
-    Agent->>GRAPH: GraphRecall(相关节点, maxHops=2)
-    GRAPH-->>Agent: 图扩展记忆 [关联历史, ...]
-
-    Agent->>PREF: BuildContext()
-    PREF-->>Agent: "【用户偏好】\n姓名: 小明\n喜好: 篮球"
-
-    Agent->>LLM: Chat(systemPrompt + 偏好 + LTM记忆 + 图记忆 + STM历史 + 当前消息)
-    LLM-->>Agent: "你好小明！喜欢篮球很棒..."
-
-    Note over User,PG: ═══════════ 每轮对话: 写入阶段 ═══════════
-    Agent->>STM: Add(assistant, 回答内容)
-
-    Agent->>LTM: Store(用户消息, importance, embedding?)
-    alt Embedding API 可用
-        Agent->>EMB: Embed(消息内容)
-        EMB-->>LTM: 语义向量
-        loop 去重检测: vs 每条已有条目
-            LTM->>LTM: cosine(newEmb, itemEmb)
-            alt sim ≥ 0.95 (去重阈值)
-                LTM->>LTM: 更新已有条目重要性+访问时间
-            else sim < 0.95
-                LTM->>LTM: 新增条目
-            end
-        end
-        LTM->>PG: SaveLongTermItem(content, vector, importance)
-    else 降级: TF词袋
-        LTM->>LTM: buildVocab + textToVector
-        LTM->>PG: SaveLongTermItem(content, nil, importance)
-    end
-
-    Agent->>GRAPH: 新增记忆节点 + 关系<br/>(FOLLOWS/SIMILAR_TO/CAUSES)
-
-    par 异步: LLM NER偏好提取
-        Agent->>LLM: "从以下对话提取用户偏好: ..."
-        LLM-->>Agent: {"姓名":"小明","喜好":"篮球"}
-        Agent->>PREF: SaveBatch(kvs)
-        PREF->>PG: SavePreference(key, value)
-    and 同步: 规则兜底 (立即生效)
-        Agent->>PREF: ExtractAndSave("我喜欢打篮球")
-        PREF-->>Agent: key="喜好", value="打篮球", ok=true
-        PREF->>PG: SavePreference(key, value)
-    end
-
-    Note over User,PG: ═══════════ 合并触发: 每5条新记忆 ═══════════
-    LTM->>LTM: NeedConsolidation()?
-    alt storeCount ≥ TriggerInterval(5)
-        Note over LTM: Phase 1: 重要性衰减
-        LTM->>LTM: importance × DecayRate^days<br/>(每日×0.995, 30天≈0.86)
-        Note over LTM: Phase 2: 去重 + 合并
-        loop 两两比较相似度
-            alt sim ≥ 0.95 (DedupThreshold)
-                LTM->>LTM: 保留importance更高的, 删除另一条
-                LTM->>PG: DELETE removed IDs
-                LTM->>GRAPH: 删除对应图节点
-            else sim ≥ 0.80 (SimilarityThreshold)
-                LTM->>LTM: mergeItems(): 内容拼接/保留较长
-                LTM->>PG: UPDATE merged item, DELETE被合并条目
-                LTM->>GRAPH: 合并图关系, 保护高中心度节点
-            end
-        end
-        Note over LTM: Phase 3: 过期淘汰
-        loop 检查每条记忆
-            alt days > TTL(30) AND importance < Min(0.3)
-                LTM->>LTM: 删除过期条目
-                LTM->>PG: DELETE expired IDs
-            end
-        end
-        LTM->>LTM: rebuildVocab() 重建词表
-    end
-
-    Note over User,PG: ═══════════ 会话结束 ═══════════
-    Note right of STM: 进程消亡, STM清除<br/>不持久化（设计如此）
-    Note right of LTM: 已实时持久化到PG<br/>Consolidation结果已同步
-    Note right of GRAPH: 图关系已持久化到Neo4j<br/>下次启动恢复
-    Note right of PREF: 已实时持久化到PG<br/>下次启动LoadPreferences恢复
-```
-
-
-## 技术实现亮点
-
-- **RAG 检索增强**：
-    - 支持三路混合检索（Milvus 语义向量、ES BM25 关键词、Neo4j 知识图谱），RRF 融合排序。
-    - 文本分块采用窗口重叠，提升召回覆盖率。
-    - 检索模式自动切换，单路故障自动降级，支持企业级高可用。
-    - 检索结果结构化，便于 LLM 合成与追溯。
-
-- **三层记忆系统**：
-    - 短期记忆：滑动窗口保存最近 N 轮对话。
-    - 长期记忆：Embedding/TF 双层，支持去重、合并、衰减、过期淘汰。
-    - 偏好记忆：LLM+规则自动提取用户偏好，持久化跨会话恢复。
-
-- **图增强记忆**：
-    - 记忆写入时自动建立时序（FOLLOWS）、相似（SIMILAR_TO）等关系。
-    - 支持图扩展召回，发现间接关联历史记忆。
-    - 合并淘汰时保护高中心度节点，防止核心知识丢失。
-
-- **智能体与工具链**：
-    - 路由优先级：ReAct 复合推理 > 单工具 > RAG 检索 > 纯对话。
-    - 工具链支持自定义扩展，RAG 检索作为知识库工具无缝集成。
-    - ReAct 规划-执行-生成流程，任务快照与重试机制保障稳定性。
-
-- **沙箱执行**：
-    - 支持 Docker（资源隔离 + 安全限制）、Local（直接执行）、Mock（测试）三种后端。
-    - 命令长度限制、白名单校验、资源配额（CPU/内存/PID/网络/只读文件系统）。
-
-- **工程与基础设施**：
-    - PostgreSQL 持久化所有关键数据。
-    - Milvus/ES/Neo4j/Kafka 可选，自动降级，适配多种部署环境。
-    - 前后端解耦，支持多端接入。
-
----
-
-## 快速开始
-
-### 本地运行
+### Start with Docker Compose
 
 ```bash
-# 1. 安装依赖
-go mod tidy
+git clone https://github.com/yu-xin-c/Sea-mult-agent.git
+cd Sea-mult-agent/scholar-agent
 
-# 2. 启动基础设施（需要 Docker Desktop）
-docker compose up -d
+cp backend.env.example backend.env
+# 编辑 backend.env，至少填写 OPENAI_API_KEY
 
-# 3. 启动应用
-go run ./cmd/server
-
-# 4. 访问 http://localhost:8090
+docker compose up --build -d
 ```
 
-### Docker 部署
+启动后访问：
+
+| 服务 | 地址 |
+|---|---|
+| Web UI | http://localhost:5173 |
+| Backend API | http://localhost:8080 |
+| Health Check | http://localhost:8080/api/health |
+| Sandbox API | http://localhost:8082 |
+
+确认后端与沙箱均已就绪：
 
 ```bash
-# 编译 + 启动全部服务
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o alchemist-assistant ./cmd/server
-docker compose up -d --build
+curl -s http://localhost:8080/api/health
 ```
 
-### 配置
+期望响应中同时出现 `backend.ok=true` 与 `sandbox.ok=true`。查看日志或停止服务：
 
-编辑 `config/config.yaml`，填入 API Key：
-
-- `llm.api_key` — 火山引擎 Ark 对话模型 API Key
-- `embedding.api_key` — 火山引擎 Embedding 模型 API Key
-- `search.api_key` — Tavily 搜索 API Key（可选）
-
-> 所有基础设施（Milvus/PG/ES/Kafka/Neo4j）均为可选，连接失败自动降级为内存模式，不影响启动。
-
----
-
-## 目录结构
-
-```
-├── config/                   配置加载（YAML → 结构体）
-│   ├── config.go
-│   └── config.yaml
-├── internal/
-│   ├── application/          应用编排层（chat agent / ReAct / graph runtime）
-│   ├── domain/               领域能力（RAG / promptctx / memory / sandbox / tool）
-│   ├── infrastructure/       基础设施实现（LLM / persistence / platform / tool）
-│   └── interfaces/           HTTP API 路由处理
-├── frontend/                 单文件前端 HTML
-├── cmd/server/main.go        入口
-├── docker-compose.yml        基础设施编排
-├── Dockerfile                应用容器镜像
-└── go.mod
+```bash
+docker compose logs -f
+docker compose down
 ```
 
----
+### Try a Reproduction Plan
 
-## 致谢
+在 Web UI 中输入：
 
-本项目受多模态智能体、RAG、知识图谱、记忆增强等前沿研究启发，欢迎交流与合作。
+```text
+请使用 https://github.com/harvardnlp/annotated-transformer 复现
+Attention Is All You Need，使用 smoke 模式运行轻量注意力消融，
+不要执行 WMT14 完整训练。
+```
+
+系统会生成并执行如下主链：
+
+```text
+解析论文 -> 冻结主张 Rubric -----------+
+    \-> 检索仓库 -> 准备工作区 -> 解析依赖
+        -> 准备运行时 -> 安装依赖 -> 执行实验 -> 对比论文声明
+                                                  -> 主张证据图
+```
+
+### Benchmark a Repository with Your Data
+
+在 Web UI 上传 `CSV`、`TSV`、`JSON` 或 `JSONL`，然后输入：
+
+```text
+用 https://github.com/OWNER/REPOSITORY 跑 benchmark，
+输入列是 review，标签列是 label，最多运行 500 条样本。
+```
+
+系统会分析数据契约、克隆仓库、生成独立适配器，并在正式运行前用最多 8 条样本预检。分类和回归指标会根据逐样本预测由 Go harness 重算。论文代码运行失败时，同一 Agent 还能在有限源码上下文中生成最小补丁并重跑。组件架构、状态机、Artifact 契约和限制见 [Research Coding Agent](scholar-agent/docs/research_coding_agent.md)。
+
+## Interface
+
+执行图仅突出主控制链和必要的数据依赖，重复连线会自动合并。节点编号、Agent 类型和状态共同建立阅读顺序；长链使用紧凑蛇形布局，移动端可在“对话 / 流程”视图间切换。
+
+点击节点后可以查看任务描述、实时日志、生成代码、报告、指标和图表。论文复现末端还会提供三泳道 Claim-to-Evidence Graph，可缩放查看每条主张、独立准则、证据状态和 Artifact 哈希。
+
+![ScholarAgent node execution panel](scholar-agent/docs/assets/scholar-agent-node-panel.png)
+
+## Architecture
+
+```text
+User / Researcher
+       |
+       v
+React Workbench -- REST --> Go API / Intent Router
+       ^                         |
+       | SSE                     v
+       +---------------- Plan Store <--> Planner / Scheduler
+                                      |
+                         +---------+---------+---------+
+                         |         |         |         |
+                    Librarian    Coder   ResearchCoding   Data
+                         |         |         |
+                         +---------+----+----+
+                                        |
+                                  Docker Sandbox
+                                      |
+                           Logs / Metrics / Artifacts
+```
+
+### Core Components
+
+| 组件 | 目录 | 职责 |
+|---|---|---|
+| Frontend | `scholar-agent/frontend` | React 工作台、DAG 可视化、PDF 与执行结果展示 |
+| Backend | `scholar-agent/backend` | Gin API、意图识别、Planner、Scheduler、Agent 与 SSE |
+| Docker Sandbox | `scholar-agent/docker-sandbox` | 容器创建、命令执行、文件与运行时生命周期管理 |
+| Python AI Service | `scholar-agent/ai-services` | 可选的 Python 意图识别服务，不在默认 Compose 中启动 |
+| Documentation | `scholar-agent/docs` | 启动、架构、规划、实验和用户文档 |
+
+### Agent Roles
+
+| Role | Responsibility |
+|---|---|
+| **Librarian** | 论文解析、资料检索、方法与声明提取，以及实验前冻结分层 Rubric |
+| **Coder** | 仓库发现、代码准备、依赖分析和修复 |
+| **Sandbox** | 运行时准备、依赖安装与隔离实验执行 |
+| **Data** | 指标汇总、论文声明对比、证据图判定、报告与图表生成 |
+| **Research Coding** | 论文仓库代码调试、受限补丁与重跑，以及自有数据 Benchmark 适配和证据校验 |
+| **Chat** | 通用问答与轻量任务入口 |
+
+## API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | 检查后端、沙箱与 GPU runtime 状态 |
+| `POST` | `/api/plan` | 根据用户意图创建并保存 DAG |
+| `GET` | `/api/plans/:id` | 查询计划、节点状态和产物 |
+| `POST` | `/api/plans/:id/execute` | 启动整张计划图 |
+| `POST` | `/api/plans/:id/approve` | 批准需要人工确认的计划 |
+| `POST` | `/api/plans/:id/cancel` | 取消计划与未完成节点 |
+| `POST` | `/api/plans/:id/tasks/:taskId/retry` | 重试失败、阻塞或取消节点 |
+| `POST` | `/api/plans/:id/tasks/:taskId/reassign` | 重分配节点并使旧执行租约失效 |
+| `GET` | `/api/plans/:id/events` | 获取计划事件历史 |
+| `GET` | `/api/plans/:id/stream` | 订阅计划级 SSE 事件流 |
+| `POST` | `/api/execute` | 直接执行单个 Agent 任务并流式返回结果 |
+| `POST` | `/api/uploads` | 上传论文、配置或小型 Benchmark 数据并返回附件 ID |
+| `GET` | `/api/uploads/:id/content` | 按用户所有权读取上传内容 |
+| `POST` | `/api/chat` | 通用对话接口 |
+| `GET` | `/api/pdf-proxy?url=...` | 代理读取远端 PDF |
+
+## Configuration
+
+复制 `scholar-agent/backend.env.example` 为 `backend.env` 后配置：
+
+| Variable | Required | Default / Purpose |
+|---|---:|---|
+| `OPENAI_API_KEY` | Yes | OpenAI-compatible API 密钥 |
+| `OPENAI_BASE_URL` | No | 默认示例为 DashScope compatible endpoint |
+| `OPENAI_MODEL_NAME` | No | 默认示例为 `qwen3-coder-plus` |
+| `SANDBOX_URL` | No | 本地默认 `http://localhost:8082`；Compose 会覆盖为服务地址 |
+| `SANDBOX_DEFAULT_IMAGE` | No | 论文 smoke test 使用的预装运行时镜像 |
+| `REDIS_ADDR` | No | 启用会话记忆；未设置时使用 No-op memory store |
+| `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DB` | No | 可选 Redis 认证与数据库配置 |
+| `PLAN_STORE_PATH` | No | 单机计划和事件 JSON 存储；Compose 默认启用持久卷 |
+| `PLAN_MAX_TASK_ATTEMPTS` / `PLAN_MAX_DURATION_SECONDS` | No | 计划尝试次数与时长预算 |
+| `REQUIRE_PLAN_APPROVAL` | No | 强制计划在执行前人工审批 |
+| `API_AUTH_TOKEN` / `SANDBOX_API_TOKEN` | No | 部署 API 与内部沙箱的静态 Bearer 保护 |
+| `CORS_ALLOWED_ORIGINS` | No | 允许访问后端的前端 Origin 列表 |
+
+GPU 透传需要宿主机安装 NVIDIA Container Toolkit，并在 Compose 环境中设置：
+
+```bash
+SANDBOX_DOCKER_GPUS=all docker compose up --build -d
+```
+
+这只启用 GPU 设备透传；`SANDBOX_DEFAULT_IMAGE` 仍需指向包含 CUDA 与所需框架的镜像。
+
+## Development
+
+```bash
+cd scholar-agent
+
+make install       # 安装前端依赖并整理 Go modules
+make lint          # 前端 ESLint
+make test          # 后端、沙箱与离线示例测试
+make build         # 构建前端、后端与沙箱
+make package       # 构建带嵌入式前端的单文件服务
+```
+
+分别启动本地服务时，请在三个终端中运行：
+
+```bash
+make run-sandbox
+make run-backend
+make run-frontend
+```
+
+Windows 用户可使用 `scholar-agent/scripts/windows/` 中的 PowerShell 脚本。更完整的环境说明见[本地启动指南](scholar-agent/docs/local_startup_guide.md)。
+
+## Reproduction
+
+项目包含可审计的轻量论文复现记录，用于验证 ScholarAgent 的执行链和结构行为，不替代论文完整训练结果。
+
+从 [`examples/paper-reproduction`](scholar-agent/examples/paper-reproduction/) 开始，可以通过 Web API
+重跑同一条项目原生链路，并自动验收 DAG 状态、仓库选择、关键 Artifact 和事件历史。
+
+| Record | Execution Boundary | Result |
+|---|---|---|
+| [项目原生 DAG 消融](scholar-agent/docs/experiments/2026-07-17_attention_project_native_ablation.md) | `/api/plan` -> Scheduler -> Agent -> Docker -> SSE/Artifact | 8/8 节点完成，15 个产物，61 个事件 |
+| [真实仓库 smoke test](scholar-agent/docs/experiments/2026-07-17_attention_repo_smoke.md) | 指定论文仓库的受控集成测试 | 验证仓库发现、准备与执行链 |
+| [单节点 CPU 消融](scholar-agent/docs/experiments/2026-07-17_attention_light_ablation.md) | ScholarAgent `/api/execute` | 标准库 CPU 微基准 |
+| [独立 V100 消融](scholar-agent/docs/experiments/2026-07-17_attention_gpu_ablation.md) | 项目外独立 PyTorch CUDA 脚本 | 非 ScholarAgent DAG，单独记录 |
+
+上述 smoke 实验不下载 WMT14、不复现 BLEU，也不应外推为完整论文训练结论。
+
+## Project Layout
+
+```text
+Sea-mult-agent/
+├── README.md
+├── LICENSE
+├── ArchitectureDiagram.png
+├── docker-core/                 # 早期/底层 Docker 执行组件
+└── scholar-agent/
+    ├── backend/                 # Go API 与多 Agent 编排核心
+    ├── frontend/                # React + TypeScript 工作台
+    ├── docker-sandbox/          # 独立 Go Docker 沙箱服务
+    ├── ai-services/             # 可选 Python 服务
+    ├── examples/                # 可运行示例与验收脚本
+    ├── test/                    # 功能 golden test 数据、运行器与截图
+    ├── docs/                    # 文档与实验记录
+    ├── scripts/                 # Unix / Windows 启动脚本
+    ├── backend.env.example
+    ├── docker-compose.yml
+    └── Makefile
+```
+
+## Documentation
+
+- [项目架构](scholar-agent/docs/project_architecture.md)
+- [本地启动指南](scholar-agent/docs/local_startup_guide.md)
+- [用户手册](scholar-agent/docs/user_manual.md)
+- [可运行示例](scholar-agent/examples/)
+- [前后端项目结构](scholar-agent/docs/project_structure_frontend_backend.md)
+- [规划与调度设计](scholar-agent/docs/plan/)
+- [Agent Runtime P0/P1](scholar-agent/docs/agent_runtime_p0_p1.md)
+- [受限 ToT 消融与文件上传](scholar-agent/docs/tot_ablation_and_uploads.md)
+- [Research Coding Agent](scholar-agent/docs/research_coding_agent.md)
+- [Claim-to-Evidence Graph](scholar-agent/docs/claim_evidence_graph.md)
+- [Claim-to-Evidence 可运行验收](scholar-agent/test/claim-evidence/)
+- [论文仓库发现](scholar-agent/docs/papers_with_code/)
+- [意图识别与评测](scholar-agent/docs/intent/)
+- [贡献指南](scholar-agent/docs/CONTRIBUTING.md)
+
+<a id="project-status"></a>
+## Project Status
+
+- **Research prototype**：接口和数据结构仍可能调整，不承诺向后兼容。
+- **Persistent single-node runtime**：配置 `PLAN_STORE_PATH` 后会原子持久化计划与事件，并在重启时恢复中断任务；多副本部署仍需要共享事务数据库和 leader election。
+- **Authentication**：已支持静态 API token 和计划所有权检查，但用户 ID/游客会话仍不是 OIDC、RBAC 或生产级多租户认证。
+- **Sandbox privilege**：已有 CPU、内存、PID、capability、镜像与挂载限制，Compose 仅本机暴露沙箱端口；但 Docker socket 仍等同于较高宿主机权限。
+- **GPU runtime**：GPU 透传已在 V100 主机验证，但默认运行时镜像为 CPU/通用 Python 镜像。
+- **Full reproduction**：当前重点是轻量 smoke 与结构消融，不包含大规模数据集训练。
+
+## Contributing
+
+Issue、文档改进、测试和小范围 PR 都欢迎提交。重大功能或架构调整请先创建 Issue 讨论，并在提交前运行：
+
+```bash
+cd scholar-agent
+make lint
+make test
+make build
+```
+
+详细约定见[贡献指南](scholar-agent/docs/CONTRIBUTING.md)。
+
+## License
+
+Sea-Mult-Agent 使用 [MIT License](LICENSE)。
